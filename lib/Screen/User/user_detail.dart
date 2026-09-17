@@ -516,6 +516,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
               final reviewerPhoto = review['reviewerPhoto'] ?? '';
               final rating = (review['rating'] ?? 0.0).toDouble();
               final reviewText = review['review'] ?? '';
+              final tags = List<String>.from(review['tags'] ?? []);
               final timestamp = review['timestamp'] as Timestamp?;
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
@@ -581,6 +582,32 @@ class _UserDetailPageState extends State<UserDetailPage> {
                         ),
                         onRatingUpdate: (_) {},
                       ),
+                      if (tags.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: tags
+                              .map((tag) => Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.tertiaryColor
+                                          .withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      tag,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppTheme.tertiaryColor,
+                                      ),
+                                    ),
+                                  ))
+                              .toList(),
+                        ),
+                      ],
                       if (reviewText.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Text(reviewText, style: const TextStyle(fontSize: 14)),

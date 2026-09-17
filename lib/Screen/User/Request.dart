@@ -304,13 +304,26 @@ class _RequestPageState extends State<RequestPage> with SingleTickerProviderStat
               label: const Text('Mark as completed'),
             ),
           ),
-          const SizedBox(height: 8),
-          TextButton.icon(
-            onPressed: rawData == null
-                ? null
-                : () => _rescheduleSession(swapId, rawData),
-            icon: const Icon(Icons.edit_calendar, size: 18),
-            label: const Text('Reschedule'),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: rawData == null
+                      ? null
+                      : () => _rescheduleSession(swapId, rawData),
+                  icon: const Icon(Icons.edit_calendar, size: 18),
+                  label: const Text('Reschedule'),
+                ),
+              ),
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: () => _confirmNoShow(swapId),
+                  style: TextButton.styleFrom(foregroundColor: Colors.grey.shade700),
+                  icon: const Icon(Icons.event_busy, size: 18),
+                  label: const Text("Didn't happen"),
+                ),
+              ),
+            ],
           ),
         ],
       );
@@ -331,7 +344,57 @@ class _RequestPageState extends State<RequestPage> with SingleTickerProviderStat
       );
     }
 
+    if (status == 'no_show') {
+      return Row(
+        children: [
+          Icon(Icons.event_busy, size: 16, color: Colors.grey.shade600),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Marked as a no-show - no points or rating for this session',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            ),
+          ),
+        ],
+      );
+    }
+
     return const SizedBox.shrink();
+  }
+
+  Future<void> _confirmNoShow(String swapId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text("Didn't happen?"),
+        content: const Text(
+          'This marks the session as a no-show. No points are awarded and '
+          "it won't unlock a rating for either of you.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.grey.shade700),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Mark as no-show'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await SwapSessionService.instance.markNoShow(swapId);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Session marked as a no-show.'
+            : 'Could not update the session. Please try again.'),
+        backgroundColor: ok ? Colors.grey.shade700 : Colors.redAccent,
+      ),
+    );
   }
 
   Widget _buildSessionsTab() {
@@ -394,6 +457,10 @@ class _RequestPageState extends State<RequestPage> with SingleTickerProviderStat
       case 'declined':
         statusColor = Colors.grey;
         statusLabel = 'Declined';
+        break;
+      case 'no_show':
+        statusColor = Colors.grey.shade700;
+        statusLabel = 'No-show';
         break;
       default:
         statusColor = Colors.orange.shade700;

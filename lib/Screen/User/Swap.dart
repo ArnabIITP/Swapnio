@@ -126,6 +126,8 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           'completedSwaps': data['completedSwaps'] ?? 0,
           'matchPercent': match.percent,
           'theyTeachIWant': match.theyTeachIWant,
+          'iTeachTheyWant': match.iTeachTheyWant,
+          'sharedAvailability': match.sharedAvailability,
           'isBanned': data['isBanned'] ?? false,
         };
       }).where((user) =>
@@ -990,36 +992,8 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
                   ),
                 ],
               ),
-              if (((user['matchPercent'] as double?) ?? 0) > 0) ...[
-                const SizedBox(height: 10),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                        color: AppTheme.primaryColor.withValues(alpha: 0.35)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.bolt,
-                          size: 16, color: AppTheme.primaryColor),
-                      const SizedBox(width: 6),
-                      Text(
-                        '${(user['matchPercent'] as double).round()}% match'
-                        '${(user['theyTeachIWant'] as List).isNotEmpty ? ' • teaches ${(user['theyTeachIWant'] as List).join(', ')}' : ''}',
-                        style: GoogleFonts.manrope(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.primaryColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              if (((user['matchPercent'] as double?) ?? 0) > 0)
+                _buildMatchBreakdown(user),
               const SizedBox(height: 22),
               Divider(height: 1, color: Colors.grey[200]),
               const SizedBox(height: 18),
@@ -1063,6 +1037,84 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// "Why this match" breakdown: shows every reason MatchService found, not
+  /// just what they teach - reciprocal interest and shared availability are
+  /// just as much a reason to like someone back, and users can't tell the
+  /// algorithm is doing anything smart if it's invisible.
+  Widget _buildMatchBreakdown(Map<String, dynamic> user) {
+    final theyTeach = List<String>.from(user['theyTeachIWant'] ?? []);
+    final iTeach = List<String>.from(user['iTeachTheyWant'] ?? []);
+    final sharedAvailability = List<String>.from(user['sharedAvailability'] ?? []);
+    final reasons = <Widget>[];
+
+    if (theyTeach.isNotEmpty) {
+      reasons.add(_matchReasonChip(
+          Icons.auto_fix_high, 'Teaches ${theyTeach.join(', ')}'));
+    }
+    if (iTeach.isNotEmpty) {
+      reasons.add(
+          _matchReasonChip(Icons.favorite_border, 'Wants ${iTeach.join(', ')}'));
+    }
+    if (sharedAvailability.isNotEmpty) {
+      reasons.add(_matchReasonChip(Icons.access_time,
+          'Free ${sharedAvailability.join(', ')}'));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.bolt, size: 16, color: AppTheme.primaryColor),
+              const SizedBox(width: 6),
+              Text(
+                '${(user['matchPercent'] as double).round()}% match',
+                style: GoogleFonts.manrope(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.primaryColor,
+                ),
+              ),
+            ],
+          ),
+          if (reasons.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(spacing: 6, runSpacing: 6, children: reasons),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _matchReasonChip(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: AppTheme.primaryColor),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: GoogleFonts.manrope(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.primaryColor,
+            ),
+          ),
+        ],
       ),
     );
   }

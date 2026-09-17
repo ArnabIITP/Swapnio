@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 
 /// Swap sessions turn a chat into a real skill exchange:
 ///
-///   pending -> accepted -> completed        (or: declined / cancelled)
+///   pending -> accepted -> completed        (or: declined / cancelled / no_show)
 ///
 /// Data model (collection `swaps`)
 ///   participants:   [uidA, uidB]
@@ -12,12 +12,15 @@ import 'package:flutter/foundation.dart';
 ///   skillOffered:   what the organiser will teach
 ///   skillWanted:    what the organiser wants to learn
 ///   scheduledFor:   Timestamp of the agreed session
-///   status:         'pending' | 'accepted' | 'declined' | 'completed'
+///   status:         'pending' | 'accepted' | 'declined' | 'completed' | 'no_show'
 ///   createdBy:      uid
 ///   createdAt / completedAt
+///   noShowReportedBy: uid of whoever flagged the no-show (accountability)
 ///
 /// Only a *completed* session unlocks a rating - enforced both here and in
-/// `firestore.rules` (ratings must reference a completed swap).
+/// `firestore.rules` (ratings must reference a completed swap). A no-show
+/// deliberately does NOT transition through `completed` - it must never
+/// award points or unlock a rating for a session that didn't happen.
 class SwapSessionService {
   SwapSessionService._();
 
@@ -29,6 +32,7 @@ class SwapSessionService {
   static const String statusAccepted = 'accepted';
   static const String statusDeclined = 'declined';
   static const String statusCompleted = 'completed';
+  static const String statusNoShow = 'no_show';
 
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
@@ -96,6 +100,24 @@ class SwapSessionService {
       return true;
     } catch (e) {
       debugPrint('SwapSessionService.updateStatus failed: $e');
+      return false;
+    }
+  }
+
+  /// Flags a scheduled session as a no-show instead of completing it - the
+  /// session simply never happened, so it must not award points or unlock a
+  /// rating the way `completeSession` does.
+  Future<bool> markNoShow(String swapId) async {
+    final uid = _uid;
+    try {
+      await _firestore.collection('swaps').doc(swapId).update({
+        'status': statusNoShow,
+        'noShowReportedBy': uid,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return true;
+    } catch (e) {
+      debugPrint('SwapSessionService.markNoShow failed: $e');
       return false;
     }
   }

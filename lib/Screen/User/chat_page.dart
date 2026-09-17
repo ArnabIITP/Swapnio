@@ -37,6 +37,16 @@ class _ChatPageState extends State<ChatPage> {
   String _failedText = '';
   String? _completedSwapId;
   final TextEditingController _reviewController = TextEditingController();
+  final Set<String> _selectedFeedbackTags = {};
+
+  static const List<String> _feedbackTagOptions = [
+    'Punctual',
+    'Clear teacher',
+    'Patient',
+    'Friendly',
+    'Well prepared',
+    'Great listener',
+  ];
 
   @override
   void initState() {
@@ -169,6 +179,7 @@ class _ChatPageState extends State<ChatPage> {
         'swapId': _completedSwapId,
         'rating': _rating,
         'review': _reviewController.text.trim(),
+        'tags': _selectedFeedbackTags.toList(),
         'timestamp': FieldValue.serverTimestamp(),
       });
 
@@ -214,6 +225,7 @@ class _ChatPageState extends State<ChatPage> {
         _showRatingDialog = false;
         _rating = 0;
         _reviewController.clear();
+        _selectedFeedbackTags.clear();
       });
       
       if (!mounted) return;
@@ -822,6 +834,31 @@ class _ChatPageState extends State<ChatPage> {
                 });
               },
             ),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: _feedbackTagOptions.map((tag) {
+              final selected = _selectedFeedbackTags.contains(tag);
+              return FilterChip(
+                label: Text(tag, style: const TextStyle(fontSize: 12)),
+                selected: selected,
+                onSelected: (value) {
+                  setState(() {
+                    if (value) {
+                      _selectedFeedbackTags.add(tag);
+                    } else {
+                      _selectedFeedbackTags.remove(tag);
+                    }
+                  });
+                },
+                selectedColor: AppTheme.primaryColor.withValues(alpha: 0.2),
+                checkmarkColor: AppTheme.primaryColor,
+                visualDensity: VisualDensity.compact,
+              );
+            }).toList(),
           ),
           const SizedBox(height: 18),
           TextField(
