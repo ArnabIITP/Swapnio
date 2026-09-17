@@ -15,9 +15,13 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'Screen/Auth/Startpage.dart';
@@ -36,17 +40,34 @@ import 'theme.dart';
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await _initializeFirebase();
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await _initializeFirebase();
 
-  // Firestore offline persistence: the app keeps working (cached reads, queued
-  // writes) on a flaky connection instead of showing empty screens.
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
-    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
-  );
+    // Firestore offline persistence: the app keeps working (cached reads, queued
+    // writes) on a flaky connection instead of showing empty screens.
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+      cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+    );
 
-  runApp(const MyApp());
+    await _initializeCrashReporting();
+
+    runApp(const MyApp());
+  }, (error, stack) {
+    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+  });
+}
+
+/// Routes Flutter framework errors and uncaught async errors (via the
+/// runZonedGuarded above) to Crashlytics instead of only the debug console,
+/// so crashes in the field are actually visible to the team.
+Future<void> _initializeCrashReporting() async {
+  FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+  PlatformDispatcher.instance.onError = (error, stack) {
+    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    return true;
+  };
 }
 
 /// Initialises Firebase with the explicit platform options when they exist and
