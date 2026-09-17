@@ -41,6 +41,14 @@
       ]
     },
     {
+      "collectionGroup": "swaps",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "scheduledFor", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "analytics",
       "queryScope": "COLLECTION",
       "fields": [

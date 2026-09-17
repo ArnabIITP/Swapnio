@@ -118,6 +118,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
         return Icons.favorite;
       case 'rating':
         return Icons.star;
+      case 'session_reminder':
+        return Icons.event_available;
+      case 'session_proposed':
+      case 'session_rescheduled':
+        return Icons.event;
       default:
         return Icons.notifications;
     }
