@@ -107,6 +107,43 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:924792323555:android:06237d60f2997dbf1f34d6",
+        "android_client_info": {
+          "package_name": "com.swapnio.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "924792323555-gcaanl6p4qdrjqks5b8aktgj6m8tt38p.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.swapnio.app",
+            "certificate_hash": "654de67824293035026e1735fde24cfc5afdba23"
+          }
+        },
+        {
+          "client_id": "924792323555-ludfh213atbvrhtclsmj6of0c8s5o3rl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCU-1ZAV-CwS0c4zE_0Lr4MsfpBZcFui_M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "924792323555-ludfh213atbvrhtclsmj6of0c8s5o3rl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"

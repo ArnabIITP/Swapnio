@@ -1,4 +1,4 @@
-package com.example.untitled
+package com.swapnio.app
 
 import io.flutter.embedding.android.FlutterActivity
 

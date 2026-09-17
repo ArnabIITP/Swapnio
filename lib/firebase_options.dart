@@ -37,10 +37,10 @@ class DefaultFirebaseOptions {
     }
   }
 
-  // Android client (package com.example.untitled) of project hotelbooking-f6a24.
+  // Android client (package com.swapnio.app) of project hotelbooking-f6a24.
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyCU-1ZAV-CwS0c4zE_0Lr4MsfpBZcFui_M',
-    appId: '1:924792323555:android:dff59df1a116e7cf1f34d6',
+    appId: '1:924792323555:android:06237d60f2997dbf1f34d6',
     messagingSenderId: '924792323555',
     projectId: 'hotelbooking-f6a24',
     storageBucket: 'hotelbooking-f6a24.firebasestorage.app',

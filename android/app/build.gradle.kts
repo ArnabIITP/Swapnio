@@ -9,7 +9,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.untitled"
+    namespace = "com.swapnio.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
@@ -23,7 +23,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.untitled"
+        applicationId = "com.swapnio.app"
         // The app supports Android 6.0 (API 23) and newer.
         // Must be an explicit 23: firebase-auth 23.x declares minSdk 23, and
         // flutter.minSdkVersion only resolves to 21 (manifest merger fails).
