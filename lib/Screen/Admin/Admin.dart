@@ -16,7 +16,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   late TabController _tabController;
-  bool _isLoading = false;
+  bool _isLoading = true;
   Map<String, dynamic> _stats = {};
   List<DocumentSnapshot> _allUsers = [];
   List<Map<String, dynamic>> _adminSkills = [];
@@ -194,11 +194,12 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
               statusBarIconBrightness: Brightness.light,
             ),
           ),
-        ],
-        body: Column(
-          children: [
-            if (!_isLoading) _buildStatsSection(),
-            Padding(
+          // Stats + search scroll away with the banner instead of
+          // permanently sitting above every tab's content regardless of
+          // scroll position or which tab is selected.
+          if (!_isLoading) SliverToBoxAdapter(child: _buildStatsSection()),
+          SliverToBoxAdapter(
+            child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: TextField(
                 controller: _searchController,
@@ -226,6 +227,10 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 },
               ),
             ),
+          ),
+        ],
+        body: Column(
+          children: [
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 16),
               decoration: BoxDecoration(
@@ -404,7 +409,10 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
         final email = data['email'] ?? 'No email';
         final skills = (data['skillsOffered'] as List?)?.join(", ") ?? 'None';
         final photoUrl = data['photoUrl'] as String?;
-        final rating = (data['rating'] ?? 0.0) as double;
+        // Firestore returns whole-number ratings (e.g. 0, 5) as int, not
+        // double - a direct `as double` cast throws for any such user and
+        // was breaking the entire list's rendering.
+        final rating = (data['rating'] as num?)?.toDouble() ?? 0.0;
         final isAdmin = (data['isAdmin'] ?? false) as bool;
         return Card(
           margin: const EdgeInsets.only(bottom: 14),

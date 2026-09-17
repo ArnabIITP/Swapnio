@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:swapnio/Screen/User/setup.dart';
 import 'package:swapnio/Screen/User/notification_settings.dart';
@@ -9,7 +10,10 @@ import 'package:swapnio/Screen/User/privacy_settings.dart';
 import 'package:swapnio/providers/user_data_provider.dart';
 import 'package:swapnio/providers/app_state.dart';
 import '../Admin/Admin.dart';
+import '../../features/gamification/gamification_model.dart';
+import '../../features/gamification/gamification_provider.dart';
 import '../../services/skill_catalog_service.dart';
+import '../../services/swap_service.dart';
 import '../../theme.dart';
 import '../../ui/skill_suggestion_chips.dart';
 
@@ -22,6 +26,45 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  bool _isSettingsSheetOpen = false;
+
+  /// The header gear icon toggles the settings panel open/closed - tapping
+  /// again while it's open dismisses it instead of stacking another sheet.
+  void _toggleSettingsSheet(Map<String, dynamic> userData) {
+    if (_isSettingsSheetOpen) {
+      Navigator.of(context).pop();
+      return;
+    }
+    _isSettingsSheetOpen = true;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => SizedBox(
+        height: MediaQuery.of(sheetContext).size.height * 0.85,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Theme.of(sheetContext).scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade400,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Expanded(child: _SettingsTabView(userData: userData)),
+            ],
+          ),
+        ),
+      ),
+    ).whenComplete(() => _isSettingsSheetOpen = false);
+  }
 
   @override
   void initState() {
@@ -144,7 +187,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                                   tabs: const [
                                     Tab(text: 'About', icon: Icon(Icons.person)),
                                     Tab(text: 'Skills', icon: Icon(Icons.lightbulb)),
-                                    Tab(text: 'Settings', icon: Icon(Icons.settings)),
+                                    Tab(text: 'Activity', icon: Icon(Icons.emoji_events)),
                                   ],
                                 ),
                               ),
@@ -155,7 +198,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                                   children: [
                                     _AboutTabView(userData: userData),
                                     _SkillsTabView(userData: userData),
-                                    _SettingsTabView(userData: userData),
+                                    _AchievementsTabView(userId: user.uid),
                                   ],
                                 ),
                               ),
@@ -199,9 +242,8 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                     ),
                     IconButton(
                       icon: const Icon(Icons.settings, color: Colors.white),
-                      onPressed: () {
-                        _tabController.animateTo(2);
-                      },
+                      tooltip: 'Settings',
+                      onPressed: () => _toggleSettingsSheet(userData),
                     ),
                   ],
                 ),
@@ -971,14 +1013,6 @@ class _SettingsTabView extends StatelessWidget {
             const SizedBox(height: 8),
             _buildSettingsButton(
               context,
-              icon: Icons.emoji_events,
-              title: 'Gamification',
-              subtitle: 'Earn points, badges and level up',
-              onTap: () => Navigator.pushNamed(context, '/gamification'),
-            ),
-            const SizedBox(height: 16),
-            _buildSettingsButton(
-              context,
               icon: Icons.insights,
               title: 'Progress Dashboard',
               subtitle: 'Track sessions, quizzes and peer ratings',
@@ -1129,6 +1163,333 @@ class _SettingsTabView extends StatelessWidget {
         trailing: const Icon(Icons.arrow_forward_ios, size: 16),
         onTap: onTap,
       ),
+    );
+  }
+}
+
+/// Combined "Achievements" (points/level/badges/leaderboard) and "Activity"
+/// (recent swap sessions, reviews received) tab - this used to be two taps
+/// away under Settings; putting it on the profile directly makes it visible
+/// without hunting for it.
+class _AchievementsTabView extends StatelessWidget {
+  final String userId;
+
+  const _AchievementsTabView({required this.userId});
+
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => GamificationProvider(userId: userId),
+      child: Consumer<GamificationProvider>(
+        builder: (context, provider, _) {
+          final gamification = provider.gamification;
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (gamification == null)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                else
+                  _buildGamificationSection(context, gamification),
+                const SizedBox(height: 28),
+                Text(
+                  'Recent Sessions',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _buildRecentSessions(context),
+                const SizedBox(height: 28),
+                Text(
+                  'Recent Reviews',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _buildRecentReviews(context),
+                const SizedBox(height: 28),
+                Text(
+                  'Leaderboard',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _buildLeaderboard(context),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildGamificationSection(BuildContext context, Gamification gamification) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _statCard(context,
+                  icon: Icons.stars, label: 'Points', value: '${gamification.points}'),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _statCard(context,
+                  icon: Icons.military_tech, label: 'Level', value: '${gamification.level}'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Badges',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+        ),
+        const SizedBox(height: 8),
+        gamification.badges.isEmpty
+            ? Text(
+                'No badges yet - complete a swap session to earn your first one!',
+                style: TextStyle(color: Colors.grey.shade600),
+              )
+            : Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: gamification.badges
+                    .map((b) => Chip(
+                          label: Text(b),
+                          backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.08),
+                          side: BorderSide(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
+                        ))
+                    .toList(),
+              ),
+      ],
+    );
+  }
+
+  Widget _statCard(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.warmBorder),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: AppTheme.primaryColor, size: 28),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecentSessions(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: SwapSessionService.instance.mySessionsStream(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final docs = (snapshot.data?.docs ?? []).take(5).toList();
+        if (docs.isEmpty) {
+          return Text(
+            'No swap sessions yet.',
+            style: TextStyle(color: Colors.grey.shade600),
+          );
+        }
+        return Column(
+          children: docs.map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final names = Map<String, dynamic>.from(data['participantNames'] ?? {});
+            final otherId = List<String>.from(data['participants'] ?? [])
+                .firstWhere((p) => p != userId, orElse: () => '');
+            final otherName = (names[otherId] as String?) ?? 'Swap partner';
+            final status = (data['status'] as String?) ?? 'pending';
+            final skillOffered = data['skillOffered'] ?? '';
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(_iconForSessionStatus(status), color: AppTheme.primaryColor),
+              title: Text('$otherName - $skillOffered'),
+              subtitle: Text(_labelForSessionStatus(status)),
+              dense: true,
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
+  IconData _iconForSessionStatus(String status) {
+    switch (status) {
+      case 'completed':
+        return Icons.check_circle;
+      case 'accepted':
+        return Icons.event_available;
+      case 'declined':
+        return Icons.cancel;
+      case 'no_show':
+        return Icons.event_busy;
+      default:
+        return Icons.hourglass_empty;
+    }
+  }
+
+  String _labelForSessionStatus(String status) {
+    switch (status) {
+      case 'completed':
+        return 'Completed';
+      case 'accepted':
+        return 'Accepted - upcoming';
+      case 'declined':
+        return 'Declined';
+      case 'no_show':
+        return 'No-show';
+      default:
+        return 'Pending';
+    }
+  }
+
+  Widget _buildRecentReviews(BuildContext context) {
+    return FutureBuilder<QuerySnapshot>(
+      future: FirebaseFirestore.instance
+          .collection('ratings')
+          .where('toUserId', isEqualTo: userId)
+          .orderBy('timestamp', descending: true)
+          .limit(5)
+          .get(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final docs = snapshot.data?.docs ?? [];
+        if (docs.isEmpty) {
+          return Text(
+            'No reviews yet.',
+            style: TextStyle(color: Colors.grey.shade600),
+          );
+        }
+        return Column(
+          children: docs.map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final rating = (data['rating'] as num?)?.toDouble() ?? 0.0;
+            final review = (data['review'] as String?) ?? '';
+            final timestamp = data['timestamp'] as Timestamp?;
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.star, color: AppTheme.primaryColor),
+              title: Text('${rating.toStringAsFixed(1)} stars'),
+              subtitle: Text(review.isEmpty
+                  ? (timestamp != null ? DateFormat.yMMMd().format(timestamp.toDate()) : '')
+                  : review),
+              dense: true,
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
+  /// Top 5 users by gamification points.
+  Widget _buildLeaderboard(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('gamification')
+          .orderBy('points', descending: true)
+          .limit(5)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final docs = snapshot.data?.docs ?? [];
+        if (docs.isEmpty) {
+          return Text(
+            'No points earned yet - be the first!',
+            style: TextStyle(color: Colors.grey.shade600),
+          );
+        }
+        final uids = docs.map((d) => d.id).toList();
+        return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          future: FirebaseFirestore.instance
+              .collection('users')
+              .where(FieldPath.documentId, whereIn: uids)
+              .get(),
+          builder: (context, usersSnap) {
+            final names = <String, String>{};
+            for (final doc in usersSnap.data?.docs ?? []) {
+              names[doc.id] = (doc.data()['name'] as String?) ?? 'Swapnio user';
+            }
+            return Column(
+              children: [
+                for (var i = 0; i < docs.length; i++)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    leading: CircleAvatar(
+                      radius: 16,
+                      backgroundColor: i < 3
+                          ? AppTheme.primaryColor.withValues(alpha: 0.15)
+                          : Theme.of(context).colorScheme.surfaceContainerHighest,
+                      child: Text(
+                        '#${i + 1}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: i < 3
+                              ? AppTheme.primaryColor
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    title: Text(
+                      docs[i].id == userId ? 'You' : (names[docs[i].id] ?? 'Swapnio user'),
+                      style: TextStyle(
+                        fontWeight: docs[i].id == userId ? FontWeight.bold : null,
+                      ),
+                    ),
+                    trailing: Text(
+                      '${docs[i].data()['points'] ?? 0} pts',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }
