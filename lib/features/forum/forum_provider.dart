@@ -6,13 +6,28 @@ class ForumProvider extends ChangeNotifier {
   List<ForumPost> _posts = [];
   bool _loading = false;
   String? _error;
+  // Null means "show every skill" (the old flat-feed behavior).
+  String? selectedSkill;
 
   List<ForumPost> get posts => _posts;
   bool get loading => _loading;
   String? get error => _error;
 
+  /// Posts scoped to [selectedSkill], or every post when nothing's selected -
+  /// this is what the UI actually renders, so a thread about "Guitar" isn't
+  /// buried in a flat feed of everything else.
+  List<ForumPost> get filteredPosts {
+    if (selectedSkill == null) return _posts;
+    return _posts.where((p) => p.skillName == selectedSkill).toList();
+  }
+
   ForumProvider() {
     fetchPosts();
+  }
+
+  void setSkillFilter(String? skill) {
+    selectedSkill = skill;
+    notifyListeners();
   }
 
   Future<void> fetchPosts() async {
@@ -33,6 +48,7 @@ class ForumProvider extends ChangeNotifier {
           content: (data['content'] as String?) ?? '',
           createdAt: createdAt is Timestamp ? createdAt.toDate() : DateTime.now(),
           replies: List<String>.from(data['replies'] ?? []),
+          skillName: data['skillName'] as String?,
         );
       }).toList();
     } catch (e) {
@@ -42,13 +58,14 @@ class ForumProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> addPost(String authorId, String content) async {
+  Future<bool> addPost(String authorId, String content, {String? skillName}) async {
     final post = ForumPost(
       id: '',
       authorId: authorId,
       content: content,
       createdAt: DateTime.now(),
       replies: [],
+      skillName: skillName,
     );
     try {
       await FirebaseFirestore.instance.collection('forum_posts').add({
@@ -56,6 +73,7 @@ class ForumProvider extends ChangeNotifier {
         'content': post.content,
         'createdAt': post.createdAt,
         'replies': post.replies,
+        'skillName': post.skillName,
       });
       await fetchPosts();
       return true;
