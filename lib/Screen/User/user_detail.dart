@@ -206,6 +206,55 @@ class _UserDetailPageState extends State<UserDetailPage> {
   );
   }
 
+  /// Shows up-front how reliably this person actually turns up. Only shown
+  /// once there's enough history to be meaningful - a single no-show on a
+  /// brand-new account shouldn't brand someone permanently.
+  Widget _buildReliabilityRow() {
+    final attended = (_userData?['sessionsAttended'] as num?)?.toInt() ?? 0;
+    final noShows = (_userData?['noShowCount'] as num?)?.toInt() ?? 0;
+    final total = attended + noShows;
+    if (total < 3) return const SizedBox.shrink();
+
+    final percent = ((attended / total) * 100).round();
+    final isReliable = percent >= 80;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: (isReliable ? AppTheme.primaryColor : Colors.redAccent)
+                .withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: (isReliable ? AppTheme.primaryColor : Colors.redAccent)
+                  .withValues(alpha: 0.35),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isReliable ? Icons.verified_user : Icons.warning_amber_rounded,
+                size: 15,
+                color: isReliable ? AppTheme.primaryColor : Colors.redAccent,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '$percent% show-up rate ($total sessions)',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isReliable ? AppTheme.primaryColor : Colors.redAccent,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildPrivateProfileState() {
     final visibility = _privacy['profileVisibility'] ?? 'public';
     return Center(
@@ -352,6 +401,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
                     style: TextStyle(color: Colors.grey[700], fontSize: 14),
                   ),
                 ),
+                _buildReliabilityRow(),
                 if (showEmail && (_userData!['email'] ?? '').isNotEmpty) ...[
                   const SizedBox(height: 10),
                   Center(

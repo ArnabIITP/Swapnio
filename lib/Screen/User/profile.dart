@@ -1188,6 +1188,7 @@ class _AchievementsTabView extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                _buildReliabilityBanner(context),
                 if (gamification == null)
                   const Center(
                     child: Padding(
@@ -1235,6 +1236,64 @@ class _AchievementsTabView extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+
+  /// Warns the user about their own attendance record before they discover
+  /// it by being blocked from booking. Only appears once there's a real
+  /// record and something worth flagging.
+  Widget _buildReliabilityBanner(BuildContext context) {
+    return FutureBuilder<ReliabilityStatus>(
+      future: SwapSessionService.instance.myReliability(),
+      builder: (context, snapshot) {
+        final status = snapshot.data;
+        if (status == null || status.total < 3 || status.showUpRate >= 80) {
+          return const SizedBox.shrink();
+        }
+        final blocked = !status.canBookSessions;
+        final color = blocked ? Colors.redAccent : Colors.orange.shade800;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: color.withValues(alpha: 0.4)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(blocked ? Icons.block : Icons.warning_amber_rounded,
+                  color: color, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      blocked
+                          ? 'Session booking paused'
+                          : 'Your attendance is slipping',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: color),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      blocked
+                          ? 'You showed up to ${status.attended} of ${status.total} sessions. '
+                              'Attend the ones you\'ve agreed to and booking unlocks automatically.'
+                          : '${status.showUpRate}% show-up rate. Missing more sessions will pause your booking.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

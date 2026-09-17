@@ -494,8 +494,36 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _showProposeSessionDialog() async {
+    // Blocked users get told why and how to recover, instead of hitting an
+    // opaque permission-denied from the security rule.
+    final reliability = await SwapSessionService.instance.myReliability();
+    if (!reliability.canBookSessions) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Session booking paused'),
+          content: Text(
+            'You\'ve missed ${reliability.noShows} of your last '
+            '${reliability.total} sessions (${reliability.showUpRate}% show-up rate).\n\n'
+            'Booking is paused until that improves. Turn up to the sessions '
+            'you\'ve already agreed to, and it unlocks automatically.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Got it'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     final offeredController = TextEditingController();
     final wantedController = TextEditingController();
+    final meetingLinkController = TextEditingController();
+    final agendaController = TextEditingController();
     DateTime scheduled = DateTime.now().add(const Duration(days: 1));
 
     final proposed = await showDialog<bool>(
@@ -559,6 +587,24 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: meetingLinkController,
+                  keyboardType: TextInputType.url,
+                  decoration: const InputDecoration(
+                    labelText: 'Meeting link (optional)',
+                    hintText: 'Google Meet / Zoom / Jitsi URL',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: agendaController,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Agenda (optional)',
+                    hintText: 'What do you want to cover in this session?',
+                  ),
+                ),
               ],
             ),
           ),
@@ -595,6 +641,8 @@ class _ChatPageState extends State<ChatPage> {
       skillOffered: offered,
       skillWanted: wanted,
       scheduledFor: scheduled,
+      meetingLink: meetingLinkController.text.trim(),
+      agenda: agendaController.text.trim(),
     );
     messenger.showSnackBar(
       SnackBar(

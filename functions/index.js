@@ -241,6 +241,63 @@ exports.badgeOnProfileComplete = onDocumentUpdated(
 );
 
 /**
+ * Maintains a reliability record on each user as sessions resolve.
+ *
+ * Runs server-side because a client can only write its OWN user doc for these
+ * fields - the whole point is recording something about the OTHER person.
+ * A no-show is attributed to the participant who did NOT report it
+ * (`noShowReportedBy`), since the reporter is the one who turned up.
+ */
+exports.trackSessionReliability = onDocumentUpdated(
+  'swaps/{swapId}',
+  async (event) => {
+    const change = event.data;
+    if (!change) return;
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+    if (before.status === after.status) return;
+
+    const db = admin.firestore();
+    const participants = (after.participants || []).filter(Boolean);
+    const increment = admin.firestore.FieldValue.increment(1);
+
+    if (after.status === 'completed') {
+      await Promise.all(
+        participants.map((uid) =>
+          db.collection('users').doc(uid).set(
+            { sessionsAttended: increment },
+            { merge: true },
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (after.status === 'no_show') {
+      const reporter = after.noShowReportedBy;
+      const blamed = participants.filter((uid) => uid !== reporter);
+      await Promise.all([
+        ...blamed.map((uid) =>
+          db.collection('users').doc(uid).set(
+            { noShowCount: increment },
+            { merge: true },
+          ),
+        ),
+        // The person who showed up still gets credit for turning up.
+        ...(reporter
+          ? [
+              db.collection('users').doc(reporter).set(
+                { sessionsAttended: increment },
+                { merge: true },
+              ),
+            ]
+          : []),
+      ]);
+    }
+  },
+);
+
+/**
  * Reminds both participants ~1 hour before an accepted swap session.
  *
  * Runs every 15 minutes and looks at a 20-minute window starting 50 minutes

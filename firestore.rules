@@ -38,6 +38,18 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
 
+    // No-show enforcement: someone who repeatedly fails to turn up loses the
+    // ability to book more sessions until their record recovers. New accounts
+    // (fewer than 3 resolved sessions) always pass, so a single early no-show
+    // can't lock anyone out. Recovery is automatic - attending sessions pulls
+    // the ratio back above the line.
+    function isReliableEnough() {
+      let profile = userDoc(uid());
+      let attended = profile.get('sessionsAttended', 0);
+      let noShows = profile.get('noShowCount', 0);
+      return (attended + noShows) < 3 || attended * 2 >= (attended + noShows);
+    }
+
     // ------------------------------------------------------------------ users
     match /users/{userId} {
       // Discoverability: every signed-in user can browse profiles.
@@ -118,7 +130,9 @@ service cloud.firestore {
       // without it, Firestore rejects that query outright since it can't
       // verify the participants-only rule for every possible matching doc.
       allow read: if isSignedIn() && (uid() in resource.data.participants || isAdmin());
-      allow create: if isSignedIn() && uid() in request.resource.data.participants;
+      allow create: if isSignedIn()
+        && uid() in request.resource.data.participants
+        && isReliableEnough();
       allow update: if isSignedIn() && uid() in resource.data.participants;
       allow delete: if isAdmin();
     }

@@ -21,6 +21,23 @@ import 'package:flutter/foundation.dart';
 /// `firestore.rules` (ratings must reference a completed swap). A no-show
 /// deliberately does NOT transition through `completed` - it must never
 /// award points or unlock a rating for a session that didn't happen.
+/// A user's session attendance record, used to decide whether they may book
+/// further sessions (see `isReliableEnough()` in firestore.rules).
+class ReliabilityStatus {
+  final int attended;
+  final int noShows;
+
+  const ReliabilityStatus({required this.attended, required this.noShows});
+
+  int get total => attended + noShows;
+
+  /// Percentage of resolved sessions the user actually turned up for.
+  int get showUpRate => total == 0 ? 100 : ((attended / total) * 100).round();
+
+  /// New accounts get the benefit of the doubt until they have a real record.
+  bool get canBookSessions => total < 3 || attended * 2 >= total;
+}
+
 class SwapSessionService {
   SwapSessionService._();
 
@@ -35,6 +52,27 @@ class SwapSessionService {
   static const String statusNoShow = 'no_show';
 
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
+
+  /// Whether the current user is still allowed to book sessions, mirroring
+  /// the `isReliableEnough()` rule in firestore.rules. The rule is the real
+  /// gate - this exists so the UI can explain *why* rather than surfacing a
+  /// raw permission-denied error.
+  Future<ReliabilityStatus> myReliability() async {
+    final uid = _uid;
+    if (uid == null) return const ReliabilityStatus(attended: 0, noShows: 0);
+    try {
+      final doc = await _firestore.collection('users').doc(uid).get();
+      final data = doc.data() ?? {};
+      return ReliabilityStatus(
+        attended: (data['sessionsAttended'] as num?)?.toInt() ?? 0,
+        noShows: (data['noShowCount'] as num?)?.toInt() ?? 0,
+      );
+    } catch (e) {
+      debugPrint('SwapSessionService.myReliability failed: $e');
+      // Fail open - the security rule still enforces the real restriction.
+      return const ReliabilityStatus(attended: 0, noShows: 0);
+    }
+  }
 
   /// Live list of the current user's sessions, newest first.
   Stream<QuerySnapshot> mySessionsStream() {
@@ -55,6 +93,8 @@ class SwapSessionService {
     required String skillOffered,
     required String skillWanted,
     required DateTime scheduledFor,
+    String meetingLink = '',
+    String agenda = '',
   }) async {
     final uid = _uid;
     if (uid == null) return false;
@@ -65,6 +105,8 @@ class SwapSessionService {
         'skillOffered': skillOffered,
         'skillWanted': skillWanted,
         'scheduledFor': Timestamp.fromDate(scheduledFor),
+        'meetingLink': meetingLink,
+        'agenda': agenda,
         'status': statusPending,
         'createdBy': uid,
         'createdAt': FieldValue.serverTimestamp(),
@@ -131,6 +173,8 @@ class SwapSessionService {
     String swapId,
     List<dynamic> participants, {
     int points = 25,
+    String sessionNotes = '',
+    bool goalAchieved = true,
   }) async {
     bool transitioned = false;
     String? skillOffered;
@@ -148,6 +192,8 @@ class SwapSessionService {
           'status': statusCompleted,
           'completedAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
+          if (sessionNotes.isNotEmpty) 'sessionNotes': sessionNotes,
+          'goalAchieved': goalAchieved,
         });
         skillOffered = data['skillOffered'] as String?;
         skillWanted = data['skillWanted'] as String?;

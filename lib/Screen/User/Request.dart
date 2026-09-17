@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -287,19 +288,7 @@ class _RequestPageState extends State<RequestPage> with SingleTickerProviderStat
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: () async {
-                final messenger = ScaffoldMessenger.of(context);
-                final ok = await SwapSessionService.instance
-                    .completeSession(swapId, participants);
-                messenger.showSnackBar(
-                  SnackBar(
-                    content: Text(ok
-                        ? 'Completed! You both earned 25 points - now you can rate each other.'
-                        : 'Could not complete the session. Please try again.'),
-                    backgroundColor: ok ? AppTheme.primaryColor : Colors.redAccent,
-                  ),
-                );
-              },
+              onPressed: () => _completeSessionWithOutcome(swapId, participants),
               icon: const Icon(Icons.check_circle_outline, size: 18),
               label: const Text('Mark as completed'),
             ),
@@ -360,6 +349,74 @@ class _RequestPageState extends State<RequestPage> with SingleTickerProviderStat
     }
 
     return const SizedBox.shrink();
+  }
+
+  /// Completing a session captures what actually happened, not just a status
+  /// flip - notes and whether the learning goal was met are what turn a
+  /// "match" into a provable outcome.
+  Future<void> _completeSessionWithOutcome(
+      String swapId, List<String> participants) async {
+    final notesController = TextEditingController();
+    bool goalAchieved = true;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('How did it go?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: notesController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Session notes (optional)',
+                  hintText: 'What did you cover? What is next?',
+                ),
+              ),
+              const SizedBox(height: 12),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: goalAchieved,
+                onChanged: (value) =>
+                    setDialogState(() => goalAchieved = value ?? true),
+                title: const Text('We covered what we planned'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Complete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await SwapSessionService.instance.completeSession(
+      swapId,
+      participants,
+      sessionNotes: notesController.text.trim(),
+      goalAchieved: goalAchieved,
+    );
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Completed! You both earned 25 points - now you can rate each other.'
+            : 'Could not complete the session. Please try again.'),
+        backgroundColor: ok ? AppTheme.primaryColor : Colors.redAccent,
+      ),
+    );
   }
 
   Future<void> _confirmNoShow(String swapId) async {
@@ -530,11 +587,73 @@ class _RequestPageState extends State<RequestPage> with SingleTickerProviderStat
               ),
             ],
           ),
+          if ((data['agenda'] as String? ?? '').isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.list_alt, size: 16, color: AppTheme.tertiaryColor),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    data['agenda'] as String,
+                    style: GoogleFonts.manrope(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if ((data['sessionNotes'] as String? ?? '').isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.sticky_note_2_outlined,
+                    size: 16, color: AppTheme.primaryColor),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    data['sessionNotes'] as String,
+                    style: GoogleFonts.manrope(
+                      fontSize: 13,
+                      fontStyle: FontStyle.italic,
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.75),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if ((data['meetingLink'] as String? ?? '').isNotEmpty &&
+              (status == 'accepted' || status == 'pending')) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _openMeetingLink(data['meetingLink'] as String),
+                icon: const Icon(Icons.videocam, size: 18),
+                label: const Text('Join session'),
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           _buildSessionActions(swapId, status, isMine, participants,
               rawData: data),
         ],
       ),
+    );
+  }
+
+  /// Copies the meeting link to the clipboard. The app deliberately doesn't
+  /// bundle a video SDK - organisers paste their own Meet/Zoom/Jitsi link.
+  Future<void> _openMeetingLink(String link) async {
+    await Clipboard.setData(ClipboardData(text: link));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Meeting link copied: $link')),
     );
   }
 
