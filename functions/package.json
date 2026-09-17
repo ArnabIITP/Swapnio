@@ -1,0 +1,17 @@
+{
+  "name": "swapnio-functions",
+  "description": "Cloud Functions for Swapnio - push notifications for matches, messages and swap sessions.",
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.5.0",
+    "firebase-functions": "^5.1.0"
+  },
+  "private": true
+}
