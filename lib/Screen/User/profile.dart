@@ -9,7 +9,9 @@ import 'package:swapnio/Screen/User/privacy_settings.dart';
 import 'package:swapnio/providers/user_data_provider.dart';
 import 'package:swapnio/providers/app_state.dart';
 import '../Admin/Admin.dart';
+import '../../services/skill_catalog_service.dart';
 import '../../theme.dart';
+import '../../ui/skill_suggestion_chips.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -680,16 +682,26 @@ class _SkillsTabView extends StatefulWidget {
 class _SkillsTabViewState extends State<_SkillsTabView> {
   final TextEditingController _newSkillController = TextEditingController();
   bool _addingOfferedSkill = true;
-  
+
+  @override
+  void initState() {
+    super.initState();
+    SkillCatalogService.instance.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
+    _newSkillController.addListener(() => setState(() {}));
+  }
+
   @override
   void dispose() {
     _newSkillController.dispose();
     super.dispose();
   }
 
-  Future<void> _addSkill(String skill, bool isOffered) async {
+  Future<void> _addSkill(String rawSkill, bool isOffered) async {
+    final skill = SkillCatalogService.instance.canonicalize(rawSkill);
     if (skill.isEmpty) return;
-    
+
     final userProvider = Provider.of<UserDataProvider>(context, listen: false);
     
     try {
@@ -709,9 +721,9 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
         ? convertToStringList(widget.userData['skillsOffered'])
         : convertToStringList(widget.userData['skillsWanted']);
       
-      if (!currentSkills.contains(skill)) {
+      if (!currentSkills.any((s) => s.toLowerCase() == skill.toLowerCase())) {
         currentSkills.add(skill);
-        
+
         if (isOffered) {
           await userProvider.updateField('skillsOffered', currentSkills);
         } else {
@@ -802,6 +814,7 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
                 ElevatedButton(
                   onPressed: () {
                     _addSkill(_newSkillController.text.trim(), _addingOfferedSkill);
+                    _newSkillController.clear();
                   },
                   style: ElevatedButton.styleFrom(
                     shape: RoundedRectangleBorder(
@@ -811,6 +824,13 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
                   child: Text(_addingOfferedSkill ? 'Add to Offered' : 'Add to Wanted'),
                 ),
               ],
+            ),
+            SkillSuggestionChips(
+              query: _newSkillController.text,
+              onSelected: (s) {
+                _addSkill(s, _addingOfferedSkill);
+                _newSkillController.clear();
+              },
             ),
             const SizedBox(height: 8),
             Center(

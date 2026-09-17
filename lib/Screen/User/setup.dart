@@ -7,7 +7,9 @@ import 'package:provider/provider.dart';
 
 import '../../models/user_model.dart';
 import '../../providers/app_state.dart';
+import '../../services/skill_catalog_service.dart';
 import '../../theme.dart';
+import '../../ui/skill_suggestion_chips.dart';
 import 'Bottomnav.dart';
 
 class ProfileSetupPage extends StatefulWidget {
@@ -38,6 +40,11 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     final user = context.read<AppState>().currentUser;
     _name.text = user?.name ?? '';
     _bio.text = user?.bio ?? '';
+    SkillCatalogService.instance.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
+    _offer.addListener(() => setState(() {}));
+    _learn.addListener(() => setState(() {}));
   }
 
   @override
@@ -52,8 +59,11 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
   }
 
   void _add(TextEditingController controller, List<String> target) {
-    final value = controller.text.trim();
-    if (value.isEmpty || target.contains(value)) return;
+    final value = SkillCatalogService.instance.canonicalize(controller.text);
+    if (value.isEmpty ||
+        target.any((s) => s.toLowerCase() == value.toLowerCase())) {
+      return;
+    }
     setState(() {
       target.add(value);
       controller.clear();
@@ -150,10 +160,24 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       case 1:
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _field(_offer, 'Skill you can teach'),
+          SkillSuggestionChips(
+            query: _offer.text,
+            onSelected: (s) {
+              _offer.text = s;
+              _add(_offer, _offers);
+            },
+          ),
           ElevatedButton(onPressed: () => _add(_offer, _offers), child: const Text('Add skill')),
           _chips(_offers),
           const SizedBox(height: 20),
           _field(_learn, 'Skill you want to learn'),
+          SkillSuggestionChips(
+            query: _learn.text,
+            onSelected: (s) {
+              _learn.text = s;
+              _add(_learn, _learns);
+            },
+          ),
           ElevatedButton(onPressed: () => _add(_learn, _learns), child: const Text('Add skill')),
           _chips(_learns),
         ]);

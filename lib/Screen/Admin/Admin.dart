@@ -824,6 +824,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
             'id': doc.id,
             'name': data['name'] ?? '',
             'description': data['description'] ?? '',
+            'aliases': List<String>.from(data['aliases'] ?? []),
           };
         }).toList();
       });
@@ -910,16 +911,32 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
     );
   }
 
-  Future<bool> _addSkill(String name, String description) async {
+  Future<bool> _addSkill(String name, String description, List<String> aliases) async {
     try {
       await _firestore.collection('skills').add({
         'name': name,
         'description': description,
+        'aliases': aliases,
         'createdAt': FieldValue.serverTimestamp(),
       });
       return true;
     } catch (e) {
       print("Error adding skill: $e");
+      return false;
+    }
+  }
+
+  Future<bool> _updateSkill(
+      String docId, String name, String description, List<String> aliases) async {
+    try {
+      await _firestore.collection('skills').doc(docId).update({
+        'name': name,
+        'description': description,
+        'aliases': aliases,
+      });
+      return true;
+    } catch (e) {
+      print("Error updating skill: $e");
       return false;
     }
   }
@@ -968,33 +985,57 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
     );
   }
 
-  void _showAddSkillDialog() {
-    final TextEditingController skillNameController = TextEditingController();
-    final TextEditingController skillDescriptionController = TextEditingController();
+  void _showAddSkillDialog() => _showSkillDialog();
+
+  /// Add or edit a curated skill. Aliases power true synonym matching in
+  /// [SkillCatalogService] (e.g. "JS"/"ECMAScript" both resolving to
+  /// "JavaScript"), which case/whitespace canonicalization alone can't do -
+  /// there's no textual relationship between "JS" and "JavaScript" to
+  /// normalize, it has to be an explicit mapping an admin defines.
+  void _showSkillDialog({Map<String, dynamic>? existing}) {
+    final isEditing = existing != null;
+    final skillNameController =
+        TextEditingController(text: existing?['name'] as String? ?? '');
+    final skillDescriptionController =
+        TextEditingController(text: existing?['description'] as String? ?? '');
+    final aliasesController = TextEditingController(
+      text: (List<String>.from(existing?['aliases'] ?? [])).join(', '),
+    );
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Add New Skill'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: skillNameController,
-              decoration: const InputDecoration(
-                labelText: 'Skill Name',
-                hintText: 'e.g., Piano Teaching',
+        title: Text(isEditing ? 'Edit Skill' : 'Add New Skill'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: skillNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Skill Name',
+                  hintText: 'e.g., JavaScript',
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: skillDescriptionController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Skill Description (Optional)',
-                hintText: 'Provide details about this skill',
+              const SizedBox(height: 16),
+              TextField(
+                controller: skillDescriptionController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Skill Description (Optional)',
+                  hintText: 'Provide details about this skill',
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              TextField(
+                controller: aliasesController,
+                decoration: const InputDecoration(
+                  labelText: 'Aliases (Optional)',
+                  hintText: 'e.g., JS, ECMAScript',
+                  helperText: 'Comma-separated. Typing an alias will match this skill.',
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -1005,20 +1046,29 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
             onPressed: () async {
               final skillName = skillNameController.text.trim();
               if (skillName.isEmpty) return;
+              final aliases = aliasesController.text
+                  .split(',')
+                  .map((s) => s.trim())
+                  .where((s) => s.isNotEmpty)
+                  .toList();
               Navigator.pop(dialogContext);
-              final ok = await _addSkill(skillName, skillDescriptionController.text.trim());
+              final ok = isEditing
+                  ? await _updateSkill(existing['id'] as String, skillName,
+                      skillDescriptionController.text.trim(), aliases)
+                  : await _addSkill(
+                      skillName, skillDescriptionController.text.trim(), aliases);
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(ok
-                      ? "Skill '$skillName' added successfully"
-                      : "Failed to add skill '$skillName'"),
+                      ? "Skill '$skillName' ${isEditing ? 'updated' : 'added'} successfully"
+                      : "Failed to ${isEditing ? 'update' : 'add'} skill '$skillName'"),
                   backgroundColor: ok ? AppTheme.primaryColor : Colors.redAccent,
                 ),
               );
               if (ok) _loadSkills();
             },
-            child: const Text('Add Skill'),
+            child: Text(isEditing ? 'Save Changes' : 'Add Skill'),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primaryColor,
               foregroundColor: Colors.white,
@@ -1074,12 +1124,15 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 runSpacing: 8,
                 children: _adminSkills.map((skill) {
                   final name = (skill['name'] as String?) ?? '';
-                  return Chip(
-                    label: Text(name),
+                  final aliases = List<String>.from(skill['aliases'] ?? []);
+                  return InputChip(
+                    label: Text(aliases.isEmpty ? name : '$name (+${aliases.length})'),
+                    tooltip: aliases.isEmpty ? null : 'Aliases: ${aliases.join(', ')}',
                     backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.08),
                     side: BorderSide(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
                     deleteIcon: const Icon(Icons.clear, size: 18, color: AppTheme.tertiaryColor),
                     onDeleted: () => _confirmDeleteSkill((skill['id'] as String?) ?? '', name),
+                    onPressed: () => _showSkillDialog(existing: skill),
                   );
                 }).toList(),
               ),
