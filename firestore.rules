@@ -106,7 +106,12 @@ service cloud.firestore {
         allow create: if isSignedIn()
           && uid() in get(/databases/$(database)/documents/chatRooms/$(roomId)).data.users
           && request.resource.data.senderId in [uid(), 'system'];
-        allow update, delete: if isAdmin();
+        // Participants may react to messages, but only touch the reactions
+        // map - the text, sender and timestamp stay immutable.
+        allow update: if isAdmin() || (isSignedIn()
+          && uid() in get(/databases/$(database)/documents/chatRooms/$(roomId)).data.users
+          && changedKeysOnly(['reactions']));
+        allow delete: if isAdmin();
       }
     }
 
@@ -186,6 +191,28 @@ service cloud.firestore {
         && request.resource.data.reporterId == uid()
         && request.resource.data.reportedUserId != uid();
       allow read, update, delete: if isAdmin();
+    }
+
+    // -------------------------------------------------------- profile views
+    // One doc per viewer per profile per day (id encodes all three), so
+    // repeat visits don't inflate the count. Only the viewed person can read
+    // who looked - viewers can't enumerate anyone's audience.
+    match /profileViews/{viewId} {
+      allow create: if isSignedIn()
+        && request.resource.data.viewerId == uid()
+        && request.resource.data.viewedUserId != uid();
+      allow update: if isSignedIn()
+        && resource.data.viewerId == uid()
+        && request.resource.data.viewerId == uid();
+      allow read: if isSignedIn() && resource.data.viewedUserId == uid();
+    }
+
+    // ------------------------------------------------------- public stats
+    // Aggregate, non-identifying numbers shown before sign-in. Written only
+    // by Cloud Functions (admin SDK bypasses these rules).
+    match /stats/{docId} {
+      allow read: if true;
+      allow write: if false;
     }
   }
 }

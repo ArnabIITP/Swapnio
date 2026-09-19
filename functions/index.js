@@ -184,6 +184,29 @@ exports.badgeOnCompletedSwap = onDocumentUpdated(
 );
 
 /**
+ * On signup:
+ *   - grant a "welcome" badge, so nobody starts with an empty badge shelf
+ *     (people finish collections they've already started - an empty shelf
+ *     reads as "nothing here for me")
+ *   - refresh the public user count shown on the signup screen, which is the
+ *     only place unauthenticated visitors can see any activity at all
+ */
+exports.onUserCreated = onDocumentCreated('users/{uid}', async (event) => {
+  const db = admin.firestore();
+  const uid = event.params.uid;
+  await awardGamification(db, uid, 0, ['welcome']);
+
+  const count = await db.collection('users').count().get();
+  await db.collection('stats').doc('public').set(
+    {
+      userCount: count.data().count,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+});
+
+/**
  * Awards a small one-time bonus for a user's very first chat message ever
  * sent, so gamification isn't only tied to completing a full swap session.
  */
