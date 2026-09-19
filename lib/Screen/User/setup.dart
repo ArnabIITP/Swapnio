@@ -1,14 +1,18 @@
 import 'dart:io';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
-import '../../models/user_model.dart';
 import '../../providers/app_state.dart';
+import '../../services/match_service.dart';
 import '../../services/skill_catalog_service.dart';
 import '../../theme.dart';
+import '../../ui/celebration.dart';
 import '../../ui/skill_suggestion_chips.dart';
 import 'Bottomnav.dart';
 
@@ -26,13 +30,18 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
   final _bio = TextEditingController();
   final _offer = TextEditingController();
   final _learn = TextEditingController();
+  // Commitment & consistency: people follow through on goals they've stated.
+  final _goal = TextEditingController();
   int _step = 0;
+  bool _forward = true;
   String _experience = 'Intermediate';
   File? _resume;
   File? _photo;
   final _offers = <String>[];
   final _learns = <String>[];
   bool _saving = false;
+  // Real profiles to preview a match against, fetched once.
+  List<Map<String, dynamic>> _candidates = [];
 
   @override
   void initState() {
@@ -40,11 +49,39 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     final user = context.read<AppState>().currentUser;
     _name.text = user?.name ?? '';
     _bio.text = user?.bio ?? '';
+    _offers.addAll(user?.skillsOffered ?? const []);
+    _learns.addAll(user?.skillsWanted ?? const []);
     SkillCatalogService.instance.ensureLoaded().then((_) {
       if (mounted) setState(() {});
     });
     _offer.addListener(() => setState(() {}));
     _learn.addListener(() => setState(() {}));
+    _loadCandidates();
+  }
+
+  Future<void> _loadCandidates() async {
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    try {
+      final snapshot =
+          await FirebaseFirestore.instance.collection('users').limit(100).get();
+      if (!mounted) return;
+      setState(() {
+        _candidates = snapshot.docs
+            .where((d) => d.id != me && d.data()['isBanned'] != true)
+            .map((d) => {'id': d.id, ...d.data()})
+            .toList();
+      });
+    } catch (_) {
+      // The teaser is a bonus - onboarding works fine without it.
+    }
+  }
+
+  void _goToStep(int step) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _forward = step > _step;
+      _step = step;
+    });
   }
 
   @override
@@ -55,6 +92,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     _bio.dispose();
     _offer.dispose();
     _learn.dispose();
+    _goal.dispose();
     super.dispose();
   }
 
@@ -112,6 +150,25 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       }
       if (_photo != null) await app.uploadProfileImage(_photo!);
       if (_resume != null) await app.uploadResume(_resume!);
+      final goal = _goal.text.trim();
+      if (goal.isNotEmpty) {
+        await FirebaseFirestore.instance.collection('users').doc(current.id).set(
+          {'monthlyGoal': goal, 'monthlyGoalSetAt': FieldValue.serverTimestamp()},
+          SetOptions(merge: true),
+        );
+      }
+      if (!mounted) return;
+      // Finishing onboarding is a real accomplishment - mark it, then land
+      // them in the app whichever way they dismiss the celebration.
+      await showCelebrationDialog(
+        context,
+        icon: Icons.rocket_launch,
+        headline: "You're all set!",
+        message: goal.isNotEmpty
+            ? 'Your goal: "$goal". Let\'s find someone who can help you get there.'
+            : 'Your profile is live. Let\'s find your first skill swap.',
+        primaryLabel: 'Start discovering',
+      );
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
@@ -180,9 +237,19 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
           ),
           ElevatedButton(onPressed: () => _add(_learn, _learns), child: const Text('Add skill')),
           _chips(_learns),
+          _buildMatchTeaser(),
         ]);
       case 2:
         return Column(children: [
+          TextField(
+            controller: _goal,
+            decoration: const InputDecoration(
+              labelText: 'One thing you want to learn this month',
+              hintText: 'e.g. Play my first song on guitar',
+              helperText: 'Optional - we\'ll keep it on your home screen',
+            ),
+          ),
+          const SizedBox(height: 18),
           ...['Beginner', 'Intermediate', 'Advanced', 'Expert'].map(
             (level) => RadioListTile<String>(
               value: level,
@@ -200,6 +267,86 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
           _uploadTile(Icons.add_a_photo, 'Add display picture', _photo?.path, _choosePhoto),
         ]);
     }
+  }
+
+  /// "See a match before you finish": once someone has entered a couple of
+  /// skills, show them a real person they'd match with. Value shown before
+  /// the form is done is the strongest reason to actually finish it.
+  Widget _buildMatchTeaser() {
+    if (_offers.length + _learns.length < 2 || _candidates.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    Map<String, dynamic>? best;
+    MatchResult? bestMatch;
+    for (final candidate in _candidates) {
+      final match = MatchService.compute(
+        mySkillsOffered: _offers,
+        mySkillsWanted: _learns,
+        myAvailability: const [],
+        candidateSkillsOffered: List<String>.from(candidate['skillsOffered'] ?? []),
+        candidateSkillsWanted: List<String>.from(candidate['skillsWanted'] ?? []),
+        candidateAvailability: const [],
+        candidateRating: (candidate['rating'] as num?)?.toDouble() ?? 0,
+      );
+      if (!match.hasAnyOverlap) continue;
+      if (bestMatch == null || match.percent > bestMatch.percent) {
+        bestMatch = match;
+        best = candidate;
+      }
+    }
+    if (best == null || bestMatch == null) return const SizedBox.shrink();
+
+    final firstName = (best['name'] as String? ?? 'Someone').split(' ').first;
+    final reasons = <String>[
+      if (bestMatch.theyTeachIWant.isNotEmpty)
+        'teaches ${bestMatch.theyTeachIWant.join(', ')}',
+      if (bestMatch.iTeachTheyWant.isNotEmpty)
+        'wants to learn ${bestMatch.iTeachTheyWant.join(', ')}',
+    ];
+
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(best['id']),
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOutBack,
+      builder: (context, value, child) => Opacity(
+        opacity: value.clamp(0.0, 1.0),
+        child: Transform.scale(scale: 0.92 + 0.08 * value, child: child),
+      ),
+      child: Container(
+        margin: const EdgeInsets.only(top: 24),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.primaryColor.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.primaryColor.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.bolt, color: AppTheme.primaryColor, size: 28),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${bestMatch.percent.round()}% match already!',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '$firstName ${reasons.join(' and ')}. '
+                    'Finish your profile to connect.',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _uploadTile(IconData icon, String label, String? path, VoidCallback onTap) {
@@ -222,19 +369,47 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            LinearProgressIndicator(value: (_step + 1) / 4),
+            TweenAnimationBuilder<double>(
+              tween: Tween(end: (_step + 1) / 4),
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.easeOutCubic,
+              builder: (context, value, _) => LinearProgressIndicator(value: value),
+            ),
             const SizedBox(height: 28),
-            Expanded(child: SingleChildScrollView(child: _content())),
+            Expanded(
+              // Steps slide in from the direction you're travelling, instead
+              // of jump-cutting between screens.
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 320),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, animation) {
+                  final incoming = child.key == ValueKey(_step);
+                  final dx = (incoming == _forward) ? 1.0 : -1.0;
+                  return SlideTransition(
+                    position: Tween<Offset>(
+                      begin: Offset(dx * 0.25, 0),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: FadeTransition(opacity: animation, child: child),
+                  );
+                },
+                child: SingleChildScrollView(
+                  key: ValueKey(_step),
+                  child: _content(),
+                ),
+              ),
+            ),
             Row(children: [
               if (_step > 0)
-                TextButton(onPressed: _saving ? null : () => setState(() => _step--), child: const Text('Back')),
+                TextButton(onPressed: _saving ? null : () => _goToStep(_step - 1), child: const Text('Back')),
               const Spacer(),
               ElevatedButton(
                 onPressed: _saving
                     ? null
                     : _step == 3
                         ? _finish
-                        : () => setState(() => _step++),
+                        : () => _goToStep(_step + 1),
                 child: _saving
                     ? const CircularProgressIndicator()
                     : Text(_step == 3 ? 'Finish' : 'Continue'),
