@@ -19,7 +19,7 @@ class Assets {
   static const String providersUserDataProvider = 'lib/providers/user_data_provider.dart';
   static const String userBottomnav = 'lib/Screen/User/Bottomnav.dart';
   static const String userChatPage = 'lib/Screen/User/chat_page.dart';
-  static const String userHome = 'lib/Screen/User/Home.dart';
+  static const String userHomeDashboard = 'lib/Screen/User/home_dashboard.dart';
   static const String userNotificationSettings = 'lib/Screen/User/notification_settings.dart';
   static const String userPrivacySettings = 'lib/Screen/User/privacy_settings.dart';
   static const String userProfile = 'lib/Screen/User/profile.dart';

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:curved_navigation_bar/curved_navigation_bar.dart';
 
-import 'package:swapnio/Screen/User/home.dart';
+import 'package:swapnio/Screen/User/home_dashboard.dart';
 import 'package:swapnio/Screen/User/setup.dart';
 import 'package:swapnio/Screen/User/Swap.dart';
 import 'package:swapnio/Screen/User/profile.dart';
@@ -21,19 +21,26 @@ class _BottomNavPageState extends State<BottomNavPage> {
   int _selectedIndex = 0;
   bool _setupPromptShown = false;
 
-  final List<Widget> _screens = [
-    HomePage(),
-    Swap(),
-    RequestPage(),
-    ProfilePage(),
+  late final List<Widget> _screens = [
+    // Home is a dashboard ("what needs me?"), Discover owns all browsing -
+    // they used to be two tabs doing the same browse job.
+    HomeDashboard(onNavigateToTab: _goToTab),
+    Swap(onNavigateToTab: _goToTab),
+    RequestPage(onNavigateToTab: _goToTab),
+    const ProfilePage(),
   ];
 
   static const List<IconData> _icons = [
     Icons.home_outlined,
-    Icons.swap_horiz,
-    Icons.receipt_long_outlined,
+    Icons.explore_outlined,
+    Icons.forum_outlined,
     Icons.person_outline,
   ];
+
+  void _goToTab(int index) {
+    if (index < 0 || index >= _screens.length) return;
+    setState(() => _selectedIndex = index);
+  }
 
   @override
   Widget build(BuildContext context) {
