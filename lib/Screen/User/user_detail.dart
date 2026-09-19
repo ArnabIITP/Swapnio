@@ -82,6 +82,8 @@ class _UserDetailPageState extends State<UserDetailPage> {
         return;
       }
 
+      _recordProfileView();
+
       // Load reviews
       final reviewsSnapshot = await FirebaseFirestore.instance
           .collection('ratings')
@@ -126,6 +128,26 @@ class _UserDetailPageState extends State<UserDetailPage> {
       print('Error loading user data: $e');
       setState(() => _isLoading = false);
     }
+  }
+
+  /// Logs that I looked at this profile - at most once per day per viewer,
+  /// since the doc id encodes both people and the date. Feeds the
+  /// "N people viewed your profile" card on the owner's home screen.
+  void _recordProfileView() {
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    if (me == null || me == widget.userId) return;
+    final now = DateTime.now();
+    final day =
+        '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+    FirebaseFirestore.instance
+        .collection('profileViews')
+        .doc('${widget.userId}_${me}_$day')
+        .set({
+      'viewedUserId': widget.userId,
+      'viewerId': me,
+      'day': day,
+      'timestamp': FieldValue.serverTimestamp(),
+    }).catchError((_) {});
   }
 
   Future<void> _sendSwapRequest() async {
@@ -324,21 +346,26 @@ class _UserDetailPageState extends State<UserDetailPage> {
             background: Container(
               color: AppTheme.primaryColor,
               child: Center(
-                child: CachedNetworkImage(
-                  imageUrl: _userData!['photoUrl'] ?? '',
-                  imageBuilder: (context, imageProvider) => CircleAvatar(
-                    radius: 70,
-                    backgroundImage: imageProvider,
-                  ),
-                  placeholder: (context, url) => CircleAvatar(
-                    radius: 70,
-                    backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.2),
-                    child: const Icon(Icons.person, size: 70, color: Colors.white),
-                  ),
-                  errorWidget: (context, url, error) => CircleAvatar(
-                    radius: 70,
-                    backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.2),
-                    child: const Icon(Icons.person, size: 70, color: Colors.white),
+                // Pairs with the avatar in Discover's list view, so opening a
+                // profile visibly carries the person's photo across.
+                child: Hero(
+                  tag: 'avatar_${widget.userId}',
+                  child: CachedNetworkImage(
+                    imageUrl: _userData!['photoUrl'] ?? '',
+                    imageBuilder: (context, imageProvider) => CircleAvatar(
+                      radius: 70,
+                      backgroundImage: imageProvider,
+                    ),
+                    placeholder: (context, url) => CircleAvatar(
+                      radius: 70,
+                      backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.2),
+                      child: const Icon(Icons.person, size: 70, color: Colors.white),
+                    ),
+                    errorWidget: (context, url, error) => CircleAvatar(
+                      radius: 70,
+                      backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.2),
+                      child: const Icon(Icons.person, size: 70, color: Colors.white),
+                    ),
                   ),
                 ),
               ),

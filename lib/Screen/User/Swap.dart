@@ -320,8 +320,15 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
     }
   }
 
-  void _showMatchDialog(String name) {
-    showCelebrationDialog(
+  Future<void> _showMatchDialog(String name) async {
+    // A beat of anticipation lands harder than an instant pop-up: two light
+    // "heartbeat" taps, then the reveal.
+    HapticFeedback.lightImpact();
+    await Future.delayed(const Duration(milliseconds: 180));
+    HapticFeedback.lightImpact();
+    await Future.delayed(const Duration(milliseconds: 260));
+    if (!mounted) return;
+    await showCelebrationDialog(
       context,
       icon: Icons.favorite,
       headline: "It's a Match!",
@@ -745,15 +752,18 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        leading: CircleAvatar(
-          radius: 24,
-          backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.12),
-          backgroundImage: (user['photoUrl'] as String?)?.isNotEmpty == true
-              ? NetworkImage(user['photoUrl'])
-              : null,
-          child: (user['photoUrl'] as String?)?.isNotEmpty == true
-              ? null
-              : const Icon(Icons.person, color: AppTheme.primaryColor),
+        leading: Hero(
+          tag: 'avatar_${user['id']}',
+          child: CircleAvatar(
+            radius: 24,
+            backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.12),
+            backgroundImage: (user['photoUrl'] as String?)?.isNotEmpty == true
+                ? NetworkImage(user['photoUrl'])
+                : null,
+            child: (user['photoUrl'] as String?)?.isNotEmpty == true
+                ? null
+                : const Icon(Icons.person, color: AppTheme.primaryColor),
+          ),
         ),
         title: Text(user['name'] ?? 'Anonymous',
             style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -940,11 +950,13 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           _buildCircleButton(
             actionColor: const Color(0xFFD8D0C8),
             icon: Icons.undo,
+            label: 'Undo last swipe',
             onPressed: _onRewind,
           ),
           _buildCircleButton(
             actionColor: AppTheme.tertiaryColor,
             icon: Icons.close,
+            label: 'Pass',
             onPressed: _onDislike,
             scale: 1.0 + (0.25 * dislikeProgress),
             activationProgress: dislikeProgress,
@@ -952,6 +964,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           _buildCircleButton(
             actionColor: const Color(0xFF86A89B),
             icon: Icons.star,
+            label: 'Save as favourite',
             onPressed: _onFavorite,
             scale: 1.0 + (0.25 * favoriteProgress),
             activationProgress: favoriteProgress,
@@ -959,6 +972,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           _buildCircleButton(
             actionColor: AppTheme.primaryColor,
             icon: Icons.favorite,
+            label: 'Send swap request',
             onPressed: _onLike,
             scale: 1.0 + (0.25 * likeProgress),
             activationProgress: likeProgress,
@@ -970,6 +984,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
 
   Widget _buildCircleButton({
     required IconData icon,
+    required String label,
     required Color actionColor,
     required VoidCallback onPressed,
     double scale = 1.0,
@@ -1000,14 +1015,20 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
         child: Material(
           color: backgroundColor,
           shape: const CircleBorder(),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(32),
-            onTap: onPressed,
-            child: Center(
-              child: Icon(
-                icon,
-                color: iconColor,
-                size: 36,
+          // Icon-only buttons are invisible to screen readers without a
+          // label; the tooltip also helps sighted users on long-press.
+          child: Tooltip(
+            message: label,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(32),
+              onTap: onPressed,
+              child: Center(
+                child: Icon(
+                  icon,
+                  color: iconColor,
+                  size: 36,
+                  semanticLabel: label,
+                ),
               ),
             ),
           ),

@@ -739,7 +739,8 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
     super.dispose();
   }
 
-  Future<void> _addSkill(String rawSkill, bool isOffered) async {
+  Future<void> _addSkill(String rawSkill, bool isOffered,
+      {bool announce = true}) async {
     final skill = SkillCatalogService.instance.canonicalize(rawSkill);
     if (skill.isEmpty) return;
 
@@ -770,6 +771,7 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
         } else {
           await userProvider.updateField('skillsWanted', currentSkills);
         }
+        if (announce) _announceSkillReach(skill, isOffered);
       }
       
       _newSkillController.clear();
@@ -780,6 +782,32 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
     }
   }
   
+  /// Effort -> reward: tie adding a skill to its immediate consequence.
+  /// Teaching X reaches everyone who wants X; wanting X reaches everyone who
+  /// teaches it. A single-field array-contains count needs no extra index.
+  Future<void> _announceSkillReach(String skill, bool isOffered) async {
+    try {
+      final result = await FirebaseFirestore.instance
+          .collection('users')
+          .where(isOffered ? 'skillsWanted' : 'skillsOffered',
+              arrayContains: skill)
+          .count()
+          .get();
+      final count = result.count ?? 0;
+      if (!mounted || count == 0) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isOffered
+              ? '$count ${count == 1 ? 'person wants' : 'people want'} to learn $skill'
+              : '$count ${count == 1 ? 'person teaches' : 'people teach'} $skill - check Discover'),
+          backgroundColor: AppTheme.primaryColor,
+        ),
+      );
+    } catch (_) {
+      // Purely encouraging - never block adding a skill on this.
+    }
+  }
+
   Future<void> _removeSkill(String skill, bool isOffered) async {
     final userProvider = Provider.of<UserDataProvider>(context, listen: false);
     
@@ -801,12 +829,26 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
         : convertToStringList(widget.userData['skillsWanted']);
       
       currentSkills.remove(skill);
-      
+
       if (isOffered) {
         await userProvider.updateField('skillsOffered', currentSkills);
       } else {
         await userProvider.updateField('skillsWanted', currentSkills);
       }
+      if (!mounted) return;
+      // Removing is one tap with no confirm dialog, so give a way back.
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Removed "$skill"'),
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'UNDO',
+              onPressed: () => _addSkill(skill, isOffered, announce: false),
+            ),
+          ),
+        );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to remove skill: $e')),

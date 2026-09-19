@@ -56,6 +56,8 @@ class _HomeDashboardState extends State<HomeDashboard> {
   late final Stream<QuerySnapshot> _incomingLikesStream;
   late final Stream<QuerySnapshot> _chatRoomsStream;
   late final Stream<QuerySnapshot> _completedSessionsStream;
+  late final Future<QuerySnapshot> _profileViewsFuture;
+  late final Future<DocumentSnapshot> _myProfileFuture;
 
   @override
   void initState() {
@@ -79,6 +81,15 @@ class _HomeDashboardState extends State<HomeDashboard> {
         .where('participants', arrayContains: uid)
         .where('status', isEqualTo: 'completed')
         .snapshots();
+    _profileViewsFuture = FirebaseFirestore.instance
+        .collection('profileViews')
+        .where('viewedUserId', isEqualTo: uid)
+        .where('timestamp',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(
+                DateTime.now().subtract(const Duration(days: 7))))
+        .get();
+    _myProfileFuture =
+        FirebaseFirestore.instance.collection('users').doc(uid).get();
   }
 
   String _greeting() {
@@ -105,8 +116,10 @@ class _HomeDashboardState extends State<HomeDashboard> {
               _buildHeader(username),
               const SizedBox(height: 20),
               _buildProfileCompletion(),
+              _buildMonthlyGoal(),
               _buildNextSession(),
               _buildWaitingOnYou(),
+              _buildProfileViews(),
               _buildUnreadChats(),
               _buildWeeklyRhythm(),
               _buildReciprocityNudge(),
@@ -274,6 +287,91 @@ class _HomeDashboardState extends State<HomeDashboard> {
           const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
         ],
       ),
+    );
+  }
+
+  /// Commitment & consistency: a goal someone stated during onboarding,
+  /// kept in view. People act in line with what they've said they'll do.
+  Widget _buildMonthlyGoal() {
+    return FutureBuilder<DocumentSnapshot>(
+      future: _myProfileFuture,
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data() as Map<String, dynamic>?;
+        final goal = (data?['monthlyGoal'] as String?)?.trim() ?? '';
+        if (goal.isEmpty) return const SizedBox.shrink();
+        return _card(
+          accent: const Color(0xFFF2C14E),
+          onTap: () {
+            HapticFeedback.selectionClick();
+            widget.onNavigateToTab?.call(1);
+          },
+          child: Row(
+            children: [
+              const Icon(Icons.flag, color: Color(0xFFD9A21B), size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Your goal this month', style: _subtitleStyle(context)),
+                    const SizedBox(height: 2),
+                    Text(goal, style: _titleStyle(context)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Social validation: knowing people looked is a strong nudge to keep a
+  /// profile sharp, and a reason to open the app at all.
+  Widget _buildProfileViews() {
+    return FutureBuilder<QuerySnapshot>(
+      future: _profileViewsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.hasError || !snapshot.hasData) {
+          return const SizedBox.shrink();
+        }
+        final viewers = snapshot.data!.docs
+            .map((d) => (d.data() as Map<String, dynamic>)['viewerId'])
+            .toSet()
+            .length;
+        if (viewers == 0) return const SizedBox.shrink();
+        return _card(
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.visibility,
+                    color: AppTheme.primaryColor, size: 20),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$viewers ${viewers == 1 ? 'person' : 'people'} viewed your profile',
+                      style: _titleStyle(context),
+                    ),
+                    const SizedBox(height: 3),
+                    Text('In the last 7 days. A clear bio and photo turn views into requests.',
+                        style: _subtitleStyle(context)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

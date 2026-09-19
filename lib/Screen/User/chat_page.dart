@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
@@ -43,7 +46,24 @@ class _ChatPageState extends State<ChatPage> {
   // and re-subscribe on every rebuild - which is what made the chat flash a
   // loading spinner constantly.
   late final Stream<QuerySnapshot> _messagesStream;
+  // The room doc carries presence-style state (who's typing, when each side
+  // last read) so it can be watched separately from the message list.
+  late final Stream<DocumentSnapshot> _roomStream;
   int _lastMessageCount = 0;
+  bool _showScrollToBottom = false;
+  Timer? _typingClearTimer;
+  DateTime? _lastTypingWrite;
+  // Only messages that arrive while the chat is open get the send/arrive
+  // animation - replaying it on the whole history at open would be noise.
+  final Set<String> _knownMessageIds = {};
+  bool _historyLoaded = false;
+  // Tracked separately from the message count: the typing bubble also
+  // changes the list's length, and needs its own scroll handling.
+  bool _typingVisible = false;
+  Timer? _typingExpiryTimer;
+
+  DocumentReference get _roomRef =>
+      FirebaseFirestore.instance.collection('chatRooms').doc(widget.chatRoomId);
 
   static const List<String> _feedbackTagOptions = [
     'Punctual',
@@ -57,44 +77,93 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
-    _messagesStream = FirebaseFirestore.instance
-        .collection('chatRooms')
-        .doc(widget.chatRoomId)
+    // includeMetadataChanges lets a just-sent message show as "sending" and
+    // then flip to "sent" once the server confirms it - Firestore already
+    // renders local writes instantly, so this is optimistic send for free.
+    _messagesStream = _roomRef
         .collection('messages')
         .orderBy('timestamp')
-        .snapshots();
+        .snapshots(includeMetadataChanges: true);
+    _roomStream = _roomRef.snapshots();
+    _messageController.addListener(_onTypingChanged);
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _markMessagesAsRead();
       _loadCompletedSession();
     });
   }
 
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    final farFromBottom = position.maxScrollExtent - position.pixels > 300;
+    if (farFromBottom != _showScrollToBottom) {
+      setState(() => _showScrollToBottom = farFromBottom);
+    }
+  }
+
+  /// Publishes "I'm typing" at most every few seconds, and clears it shortly
+  /// after the user stops - so the other side sees a live indicator without
+  /// a Firestore write per keystroke.
+  void _onTypingChanged() {
+    final uid = currentUser?.uid;
+    if (uid == null) return;
+    if (_messageController.text.trim().isEmpty) {
+      _clearTyping();
+      return;
+    }
+    final now = DateTime.now();
+    if (_lastTypingWrite == null ||
+        now.difference(_lastTypingWrite!) > const Duration(seconds: 3)) {
+      _lastTypingWrite = now;
+      _roomRef
+          .update({'typing.$uid': FieldValue.serverTimestamp()})
+          .catchError((_) {});
+    }
+    _typingClearTimer?.cancel();
+    _typingClearTimer = Timer(const Duration(seconds: 4), _clearTyping);
+  }
+
+  void _clearTyping() {
+    final uid = currentUser?.uid;
+    _typingClearTimer?.cancel();
+    if (uid == null || _lastTypingWrite == null) return;
+    _lastTypingWrite = null;
+    _roomRef.update({'typing.$uid': FieldValue.delete()}).catchError((_) {});
+  }
+
   /// Ratings are only unlocked once a swap session has been completed.
   Future<void> _loadCompletedSession() async {
-    final swapId = await SwapSessionService.instance
-        .completedSessionWith(widget.otherUserId);
+    final swapId = await SwapSessionService.instance.completedSessionWith(
+      widget.otherUserId,
+    );
     if (!mounted) return;
     setState(() => _completedSwapId = swapId);
   }
 
   @override
   void dispose() {
+    _clearTyping();
+    _typingExpiryTimer?.cancel();
+    _messageController.removeListener(_onTypingChanged);
     _messageController.dispose();
     _scrollController.dispose();
     _reviewController.dispose();
     super.dispose();
   }
 
+  /// Clears the unread badge and stamps when I last read - the other side
+  /// uses that timestamp to show "Seen" under their latest message.
   void _markMessagesAsRead() async {
     if (currentUser == null) return;
-    
-    // Update unread count to 0 for current user
-    await FirebaseFirestore.instance
-        .collection('chatRooms')
-        .doc(widget.chatRoomId)
-        .update({
-      'unreadCount.${currentUser!.uid}': 0,
-    });
+    try {
+      await _roomRef.update({
+        'unreadCount.${currentUser!.uid}': 0,
+        'lastReadAt.${currentUser!.uid}': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // A missing room (e.g. deleted by a moderator) shouldn't crash the page.
+    }
   }
 
   void _scrollToBottom() {
@@ -112,6 +181,7 @@ class _ChatPageState extends State<ChatPage> {
 
     final messageText = _messageController.text.trim();
     _messageController.clear();
+    _clearTyping();
     HapticFeedback.lightImpact();
 
     try {
@@ -121,24 +191,24 @@ class _ChatPageState extends State<ChatPage> {
           .doc(widget.chatRoomId)
           .collection('messages')
           .add({
-        'senderId': currentUser!.uid,
-        'text': messageText,
-        'timestamp': FieldValue.serverTimestamp(),
-        'type': 'text',
-      });
+            'senderId': currentUser!.uid,
+            'text': messageText,
+            'timestamp': FieldValue.serverTimestamp(),
+            'type': 'text',
+          });
 
       // Update the chat room document with the last message info
       await FirebaseFirestore.instance
           .collection('chatRooms')
           .doc(widget.chatRoomId)
           .update({
-        'lastMessage': messageText,
-        'lastMessageTime': FieldValue.serverTimestamp(),
-        'lastMessageSenderId': currentUser!.uid,
-        // Increment unread count for other user
-        'unreadCount.${widget.otherUserId}': FieldValue.increment(1),
-      });
-      
+            'lastMessage': messageText,
+            'lastMessageTime': FieldValue.serverTimestamp(),
+            'lastMessageSenderId': currentUser!.uid,
+            // Increment unread count for other user
+            'unreadCount.${widget.otherUserId}': FieldValue.increment(1),
+          });
+
       // Add a delay before scrolling to ensure the message is rendered
       Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
     } catch (e) {
@@ -157,12 +227,12 @@ class _ChatPageState extends State<ChatPage> {
       );
     }
   }
-  
+
   Future<void> _submitRating() async {
     if (_rating == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a rating')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please select a rating')));
       return;
     }
 
@@ -179,7 +249,8 @@ class _ChatPageState extends State<ChatPage> {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-                content: Text('You already rated this swap session.')),
+              content: Text('You already rated this swap session.'),
+            ),
           );
           return;
         }
@@ -214,25 +285,23 @@ class _ChatPageState extends State<ChatPage> {
         await FirebaseFirestore.instance
             .collection('users')
             .doc(widget.otherUserId)
-            .update({
-          'rating': newRating,
-          'ratingsCount': ratingsCount + 1,
-        });
+            .update({'rating': newRating, 'ratingsCount': ratingsCount + 1});
       }
-      
+
       // Add system message about the rating
       await FirebaseFirestore.instance
           .collection('chatRooms')
           .doc(widget.chatRoomId)
           .collection('messages')
           .add({
-        'senderId': 'system',
-        'text': '${currentUser!.displayName} rated this skill exchange ${_rating.toStringAsFixed(1)} stars',
-        'timestamp': FieldValue.serverTimestamp(),
-        'type': 'rating',
-        'rating': _rating,
-      });
-      
+            'senderId': 'system',
+            'text':
+                '${currentUser!.displayName} rated this skill exchange ${_rating.toStringAsFixed(1)} stars',
+            'timestamp': FieldValue.serverTimestamp(),
+            'type': 'rating',
+            'rating': _rating,
+          });
+
       // Reset rating dialog state
       setState(() {
         _showRatingDialog = false;
@@ -240,7 +309,7 @@ class _ChatPageState extends State<ChatPage> {
         _reviewController.clear();
         _selectedFeedbackTags.clear();
       });
-      
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Thank you for your rating!')),
@@ -248,9 +317,9 @@ class _ChatPageState extends State<ChatPage> {
     } catch (e) {
       print('Error submitting rating: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to submit rating: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to submit rating: $e')));
     }
   }
 
@@ -266,10 +335,8 @@ class _ChatPageState extends State<ChatPage> {
           children: [
             CachedNetworkImage(
               imageUrl: widget.otherUserPhoto,
-              imageBuilder: (context, imageProvider) => CircleAvatar(
-                radius: 20,
-                backgroundImage: imageProvider,
-              ),
+              imageBuilder: (context, imageProvider) =>
+                  CircleAvatar(radius: 20, backgroundImage: imageProvider),
               placeholder: (context, url) => CircleAvatar(
                 radius: 20,
                 backgroundColor: Colors.grey[300],
@@ -294,7 +361,10 @@ class _ChatPageState extends State<ChatPage> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.event_available, color: AppTheme.primaryColor),
+            icon: const Icon(
+              Icons.event_available,
+              color: AppTheme.primaryColor,
+            ),
             tooltip: 'Propose swap session',
             onPressed: _showProposeSessionDialog,
           ),
@@ -326,7 +396,10 @@ class _ChatPageState extends State<ChatPage> {
             },
           ),
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.onSurface),
+            icon: Icon(
+              Icons.more_vert,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
             tooltip: 'More options',
             onSelected: (value) {
               if (value == 'safety') {
@@ -354,64 +427,34 @@ class _ChatPageState extends State<ChatPage> {
       ),
       body: Column(
         children: [
-          if (_showRatingDialog)
-            _buildRatingDialog(),
+          if (_showRatingDialog) _buildRatingDialog(),
           // Messages
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _messagesStream,
-              builder: (context, snapshot) {
-                // Only the very first load shows a spinner. Re-checking
-                // `waiting` on every build is what made the chat appear to
-                // reload constantly.
-                if (snapshot.connectionState == ConnectionState.waiting &&
-                    !snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(
-                    child: Text('No messages yet. Start a conversation!'),
-                  );
-                }
-                final messages = snapshot.data!.docs;
-                // Auto-scroll only when a message actually arrives, instead of
-                // animating on every single rebuild.
-                if (messages.length != _lastMessageCount) {
-                  _lastMessageCount = messages.length;
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _scrollToBottom();
-                  });
-                }
-                final items = <Widget>[];
-                DateTime? lastDay;
-                for (final doc in messages) {
-                  final message = doc.data() as Map<String, dynamic>;
-                  final ts = message['timestamp'] as Timestamp?;
-                  if (ts != null) {
-                    final day = DateTime(
-                      ts.toDate().year,
-                      ts.toDate().month,
-                      ts.toDate().day,
-                    );
-                    if (lastDay == null || !_isSameDay(lastDay, day)) {
-                      items.add(_buildDateChip(ts.toDate()));
-                      lastDay = day;
-                    }
-                  }
-                  final senderId = message['senderId'] as String;
-                  final isCurrentUser = senderId == currentUser?.uid;
-                  final messageType = message['type'] as String? ?? 'text';
-                  if (messageType == 'system' || messageType == 'rating') {
-                    items.add(_buildSystemMessage(message));
-                  } else {
-                    items.add(_buildChatMessage(message, isCurrentUser));
-                  }
-                }
-                return ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                  itemCount: items.length,
-                  itemBuilder: (context, index) => items[index],
+            child: StreamBuilder<DocumentSnapshot>(
+              stream: _roomStream,
+              builder: (context, roomSnapshot) {
+                final room =
+                    (roomSnapshot.data?.data() as Map<String, dynamic>?) ?? {};
+                return Stack(
+                  children: [
+                    _buildMessageList(room),
+                    if (_showScrollToBottom)
+                      Positioned(
+                        right: 14,
+                        bottom: 14,
+                        child: FloatingActionButton.small(
+                          heroTag: 'chat_scroll_bottom',
+                          backgroundColor: AppTheme.primaryColor,
+                          foregroundColor: Colors.white,
+                          tooltip: 'Jump to latest',
+                          onPressed: () {
+                            HapticFeedback.selectionClick();
+                            _scrollToBottom();
+                          },
+                          child: const Icon(Icons.keyboard_arrow_down),
+                        ),
+                      ),
+                  ],
                 );
               },
             ),
@@ -429,20 +472,34 @@ class _ChatPageState extends State<ChatPage> {
                   _sendMessage();
                 },
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   child: Row(
                     children: const [
-                      Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
+                      Icon(
+                        Icons.error_outline,
+                        color: Colors.redAccent,
+                        size: 18,
+                      ),
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Message failed to send',
-                          style: TextStyle(fontSize: 13, color: Colors.redAccent),
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.redAccent,
+                          ),
                         ),
                       ),
                       Text(
                         'Tap to retry',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.redAccent),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.redAccent,
+                        ),
                       ),
                     ],
                   ),
@@ -451,7 +508,10 @@ class _ChatPageState extends State<ChatPage> {
             ),
           // Message Input
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12.0,
+              vertical: 8.0,
+            ),
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surface,
               boxShadow: [
@@ -470,7 +530,10 @@ class _ChatPageState extends State<ChatPage> {
                       controller: _messageController,
                       decoration: InputDecoration(
                         hintText: 'Type a message...',
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 12,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(28),
                           borderSide: BorderSide.none,
@@ -478,7 +541,10 @@ class _ChatPageState extends State<ChatPage> {
                         filled: true,
                         fillColor: Theme.of(context).scaffoldBackgroundColor,
                       ),
-                      style: TextStyle(fontSize: 15, color: Theme.of(context).colorScheme.onSurface),
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
                       textCapitalization: TextCapitalization.sentences,
                       onSubmitted: (_) => _sendMessage(),
                     ),
@@ -571,8 +637,11 @@ class _ChatPageState extends State<ChatPage> {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    const Icon(Icons.event,
-                        size: 18, color: AppTheme.primaryColor),
+                    const Icon(
+                      Icons.event,
+                      size: 18,
+                      color: AppTheme.primaryColor,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -586,8 +655,9 @@ class _ChatPageState extends State<ChatPage> {
                           context: context,
                           initialDate: scheduled,
                           firstDate: DateTime.now(),
-                          lastDate:
-                              DateTime.now().add(const Duration(days: 365)),
+                          lastDate: DateTime.now().add(
+                            const Duration(days: 365),
+                          ),
                         );
                         if (date == null) return;
                         final time = await showTimePicker(
@@ -596,8 +666,13 @@ class _ChatPageState extends State<ChatPage> {
                         );
                         if (time == null) return;
                         setDialogState(() {
-                          scheduled = DateTime(date.year, date.month, date.day,
-                              time.hour, time.minute);
+                          scheduled = DateTime(
+                            date.year,
+                            date.month,
+                            date.day,
+                            time.hour,
+                            time.minute,
+                          );
                         });
                       },
                       child: const Text('Change'),
@@ -663,9 +738,11 @@ class _ChatPageState extends State<ChatPage> {
     );
     messenger.showSnackBar(
       SnackBar(
-        content: Text(ok
-            ? 'Session proposed - they can accept it from the Requests tab'
-            : 'Could not propose the session. Please try again.'),
+        content: Text(
+          ok
+              ? 'Session proposed - they can accept it from the Requests tab'
+              : 'Could not propose the session. Please try again.',
+        ),
         backgroundColor: ok ? AppTheme.primaryColor : Colors.redAccent,
       ),
     );
@@ -678,8 +755,8 @@ class _ChatPageState extends State<ChatPage> {
     final label = _isSameDay(today, thatDay)
         ? 'Today'
         : _isSameDay(today, thatDay.subtract(const Duration(days: 1)))
-            ? 'Yesterday'
-            : DateFormat.yMMMd().format(date);
+        ? 'Yesterday'
+        : DateFormat.yMMMd().format(date);
     return Align(
       alignment: Alignment.center,
       child: Container(
@@ -692,8 +769,9 @@ class _ChatPageState extends State<ChatPage> {
         child: Text(
           label,
           style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurfaceVariant),
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
       ),
     );
@@ -702,88 +780,407 @@ class _ChatPageState extends State<ChatPage> {
   bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
-  Widget _buildChatMessage(Map<String, dynamic> message, bool isCurrentUser) {
-    final text = message['text'] as String;
-    final timestamp = message['timestamp'] as Timestamp?;
-    final time = timestamp != null
-        ? DateFormat.jm().format(timestamp.toDate())
-        : '';
+  static const List<String> _reactionOptions = [
+    '👍',
+    '❤️',
+    '😂',
+    '🎉',
+    '🙏',
+    '💡',
+  ];
 
-    return Align(
-      alignment: isCurrentUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.72,
-        ),
-        child: GestureDetector(
-          onLongPress: () async {
-            await Clipboard.setData(ClipboardData(text: text));
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Message copied'),
-                duration: Duration(seconds: 1),
-              ),
+  Widget _buildMessageList(Map<String, dynamic> room) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _messagesStream,
+      builder: (context, snapshot) {
+        // Only the very first load shows a spinner. Re-checking `waiting` on
+        // every build is what made the chat appear to reload constantly.
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const Center(
+            child: Text('No messages yet. Start a conversation!'),
+          );
+        }
+
+        // A just-sent message has a null server timestamp until confirmed,
+        // and Firestore orders nulls first - which would flash it at the top
+        // of the chat. Sort pending messages to the bottom instead.
+        final messages = [...snapshot.data!.docs]
+          ..sort((a, b) {
+            final rawA = (a.data() as Map<String, dynamic>?)?['timestamp'];
+            final rawB = (b.data() as Map<String, dynamic>?)?['timestamp'];
+            final ta = rawA is Timestamp ? rawA : null;
+            final tb = rawB is Timestamp ? rawB : null;
+            if (ta == null && tb == null) return 0;
+            if (ta == null) return 1;
+            if (tb == null) return -1;
+            return ta.compareTo(tb);
+          });
+
+        final newIds = messages
+            .map((d) => d.id)
+            .where((id) => !_knownMessageIds.contains(id))
+            .toSet();
+        final animateIds = _historyLoaded ? newIds : <String>{};
+        _knownMessageIds.addAll(newIds);
+        _historyLoaded = true;
+
+        if (messages.length != _lastMessageCount) {
+          final lastData = messages.last.data() as Map<String, dynamic>;
+          final lastIsMine = lastData['senderId'] == currentUser?.uid;
+          _lastMessageCount = messages.length;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            // Don't yank someone reading history back to the bottom because
+            // the other person sent something - the jump button covers that.
+            if (lastIsMine || !_showScrollToBottom) _scrollToBottom();
+            if (!lastIsMine) _markMessagesAsRead();
+          });
+        }
+
+        final readMap = room['lastReadAt'];
+        final readValue = readMap is Map ? readMap[widget.otherUserId] : null;
+        final otherReadAt = readValue is Timestamp ? readValue : null;
+        final lastMineIndex = messages.lastIndexWhere(
+          (d) =>
+              (d.data() as Map<String, dynamic>)['senderId'] ==
+                  currentUser?.uid &&
+              ((d.data() as Map<String, dynamic>)['type'] ?? 'text') == 'text',
+        );
+
+        final items = <Widget>[];
+        DateTime? lastDay;
+        for (var i = 0; i < messages.length; i++) {
+          final doc = messages[i];
+          // Each message is built in isolation: they're constructed eagerly
+          // inside this builder, so a single malformed document used to throw
+          // here and blank the entire conversation grey.
+          try {
+            final message = doc.data() as Map<String, dynamic>;
+            final ts = message['timestamp'] as Timestamp?;
+            if (ts != null) {
+              final date = ts.toDate();
+              final day = DateTime(date.year, date.month, date.day);
+              if (lastDay == null || !_isSameDay(lastDay, day)) {
+                items.add(_buildDateChip(date));
+                lastDay = day;
+              }
+            }
+            final isCurrentUser = message['senderId'] == currentUser?.uid;
+            final messageType = message['type'] as String? ?? 'text';
+            Widget bubble;
+            if (messageType == 'system' || messageType == 'rating') {
+              bubble = _buildSystemMessage(message);
+            } else {
+              final seen =
+                  i == lastMineIndex &&
+                  ts != null &&
+                  otherReadAt != null &&
+                  otherReadAt.compareTo(ts) >= 0;
+              bubble = _buildChatMessage(
+                message,
+                isCurrentUser,
+                docId: doc.id,
+                pending: doc.metadata.hasPendingWrites,
+                seen: seen,
+              );
+            }
+            items.add(
+              animateIds.contains(doc.id)
+                  ? _ArriveAnimation(
+                      key: ValueKey('anim_${doc.id}'),
+                      fromRight: isCurrentUser,
+                      child: bubble,
+                    )
+                  : bubble,
             );
-          },
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: isCurrentUser
-                  ? AppTheme.primaryColor.withValues(alpha: 0.13)
-                  : Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(isCurrentUser ? 16 : 4),
-              topRight: Radius.circular(isCurrentUser ? 4 : 16),
-              bottomLeft: const Radius.circular(16),
-              bottomRight: const Radius.circular(16),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 2,
-                offset: const Offset(0, 1),
-              ),
-            ],
+          } catch (error, stack) {
+            FirebaseCrashlytics.instance.recordError(
+              error,
+              stack,
+              reason:
+                  'chat message render failed: ${widget.chatRoomId}/${doc.id}',
+            );
+            items.add(_buildUnreadableMessage());
+          }
+        }
+
+        final typingNow = _isOtherTyping(room);
+        if (typingNow) {
+          items.add(_buildTypingIndicator());
+          // If their app dies mid-sentence the flag is never cleared, and
+          // nothing would rebuild to let it expire - so re-check shortly.
+          _typingExpiryTimer?.cancel();
+          _typingExpiryTimer = Timer(const Duration(seconds: 9), () {
+            if (mounted) setState(() {});
+          });
+        }
+        if (typingNow != _typingVisible) {
+          _typingVisible = typingNow;
+          // Bring the bubble into view when it appears, and settle back
+          // smoothly when it goes - but only if the reader is already near
+          // the bottom, never while they're scrolled up reading history.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!_showScrollToBottom) _scrollToBottom();
+          });
+        }
+
+        return ListView.builder(
+          controller: _scrollController,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          itemCount: items.length,
+          itemBuilder: (context, index) => items[index],
+        );
+      },
+    );
+  }
+
+  Widget _buildUnreadableMessage() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Center(
+        child: Text(
+          'This message could not be displayed',
+          style: TextStyle(
+            fontSize: 12,
+            fontStyle: FontStyle.italic,
+            color: Colors.grey[600],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                text,
-                style: TextStyle(
-                  fontSize: 15,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    time,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  if (isCurrentUser) ...[
-                    const SizedBox(width: 4),
-                    const Icon(Icons.check, size: 13, color: Color(0xFF9A9088)),
-                  ],
-                ],
-              ),
-            ],
-          ),
-        ),
         ),
       ),
     );
   }
+
+  bool _isOtherTyping(Map<String, dynamic> room) {
+    final typing = room['typing'];
+    final ts = typing is Map ? typing[widget.otherUserId] : null;
+    if (ts is! Timestamp) return false;
+    // Stale "typing" (app killed mid-sentence) expires on its own.
+    return DateTime.now().difference(ts.toDate()) < const Duration(seconds: 8);
+  }
+
+  Widget _buildTypingIndicator() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const _TypingDots(),
+            const SizedBox(width: 8),
+            Text(
+              '${widget.otherUserName.split(' ').first} is typing',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Long-press sheet: react, or copy. Reactions are one per person per
+  /// message - picking the same emoji again removes it.
+  Future<void> _showMessageActions(
+    String docId,
+    String text,
+    Map<String, dynamic> reactions,
+  ) async {
+    HapticFeedback.mediumImpact();
+    final uid = currentUser?.uid;
+    if (uid == null) return;
+    final mine = reactions[uid] as String?;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: _reactionOptions.map((emoji) {
+                  final selected = emoji == mine;
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(24),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      HapticFeedback.selectionClick();
+                      _roomRef
+                          .collection('messages')
+                          .doc(docId)
+                          .update({
+                            'reactions.$uid': selected
+                                ? FieldValue.delete()
+                                : emoji,
+                          })
+                          .catchError((_) {});
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: selected
+                            ? AppTheme.primaryColor.withValues(alpha: 0.18)
+                            : Colors.transparent,
+                      ),
+                      child: Text(emoji, style: const TextStyle(fontSize: 26)),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(Icons.copy),
+                title: const Text('Copy message'),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  await Clipboard.setData(ClipboardData(text: text));
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Message copied'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChatMessage(
+    Map<String, dynamic> message,
+    bool isCurrentUser, {
+    required String docId,
+    bool pending = false,
+    bool seen = false,
+  }) {
+    final text = message['text']?.toString() ?? '';
+    final rawTs = message['timestamp'];
+    final timestamp = rawTs is Timestamp ? rawTs : null;
+    final time = timestamp != null
+        ? DateFormat.jm().format(timestamp.toDate())
+        : '';
+    final reactions = Map<String, dynamic>.from(message['reactions'] ?? {});
+
+    return Align(
+      alignment: isCurrentUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Column(
+        crossAxisAlignment: isCurrentUser
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.72,
+            ),
+            child: GestureDetector(
+              onLongPress: () => _showMessageActions(docId, text, reactions),
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: isCurrentUser
+                      ? AppTheme.primaryColor.withValues(alpha: 0.13)
+                      : Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(isCurrentUser ? 16 : 4),
+                    topRight: Radius.circular(isCurrentUser ? 4 : 16),
+                    bottomLeft: const Radius.circular(16),
+                    bottomRight: const Radius.circular(16),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 2,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      text,
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          time,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        if (isCurrentUser) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            pending ? Icons.schedule : Icons.check,
+                            size: 13,
+                            color: const Color(0xFF9A9088),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (reactions.isNotEmpty)
+            Transform.translate(
+              offset: const Offset(0, -6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.warmBorder),
+                ),
+                child: Text(
+                  reactions.values.toSet().join(' ') +
+                      (reactions.length > 1 ? ' ${reactions.length}' : ''),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
+          if (seen)
+            Padding(
+              padding: const EdgeInsets.only(right: 4, bottom: 2),
+              child: Text(
+                'Seen',
+                style: TextStyle(fontSize: 10.5, color: Colors.grey[600]),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSystemMessage(Map<String, dynamic> message) {
-    final text = message['text'] as String;
-    final type = message['type'] as String? ?? 'system';
+    final text = message['text']?.toString() ?? '';
+    final type = message['type']?.toString() ?? 'system';
     final rating = type == 'rating' ? (message['rating'] ?? 0.0) : 0.0;
 
     return Container(
@@ -821,10 +1218,8 @@ class _ChatPageState extends State<ChatPage> {
                     itemCount: 5,
                     itemSize: 16,
                     ignoreGestures: true,
-                    itemBuilder: (context, _) => const Icon(
-                      Icons.star,
-                      color: AppTheme.primaryColor,
-                    ),
+                    itemBuilder: (context, _) =>
+                        const Icon(Icons.star, color: AppTheme.primaryColor),
                     onRatingUpdate: (_) {},
                   ),
                 ],
@@ -834,7 +1229,7 @@ class _ChatPageState extends State<ChatPage> {
       ),
     );
   }
-  
+
   Widget _buildRatingDialog() {
     return Container(
       margin: const EdgeInsets.all(18),
@@ -879,7 +1274,10 @@ class _ChatPageState extends State<ChatPage> {
           Text(
             'How was your skill exchange with ${widget.otherUserName}?',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 15, color: Theme.of(context).colorScheme.onSurface),
+            style: TextStyle(
+              fontSize: 15,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
           ),
           const SizedBox(height: 18),
           Center(
@@ -889,10 +1287,8 @@ class _ChatPageState extends State<ChatPage> {
               direction: Axis.horizontal,
               allowHalfRating: true,
               itemCount: 5,
-              itemBuilder: (context, _) => const Icon(
-                Icons.star,
-                color: AppTheme.primaryColor,
-              ),
+              itemBuilder: (context, _) =>
+                  const Icon(Icons.star, color: AppTheme.primaryColor),
               onRatingUpdate: (rating) {
                 setState(() {
                   _rating = rating;
@@ -934,7 +1330,10 @@ class _ChatPageState extends State<ChatPage> {
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(color: Colors.grey.shade300),
               ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
             ),
             maxLines: 3,
             style: const TextStyle(fontSize: 14),
@@ -947,7 +1346,10 @@ class _ChatPageState extends State<ChatPage> {
                 backgroundColor: AppTheme.primaryColor,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -957,6 +1359,93 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Slides a newly arrived message in from its side and settles it, so a
+/// message feels sent/received rather than just appearing.
+class _ArriveAnimation extends StatelessWidget {
+  final Widget child;
+  final bool fromRight;
+
+  const _ArriveAnimation({
+    super.key,
+    required this.child,
+    required this.fromRight,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutBack,
+      builder: (context, value, child) => Opacity(
+        opacity: value.clamp(0.0, 1.0),
+        child: Transform.translate(
+          offset: Offset(
+            (fromRight ? 24 : -24) * (1 - value),
+            14 * (1 - value),
+          ),
+          child: child,
+        ),
+      ),
+      child: child,
+    );
+  }
+}
+
+/// Three dots pulsing in sequence - the universal "someone is typing" cue.
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(3, (i) {
+          final phase = (_controller.value - i * 0.18) % 1.0;
+          final lift = phase < 0.4
+              ? (1 - (phase - 0.2).abs() / 0.2).clamp(0.0, 1.0)
+              : 0.0;
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 1.5),
+            child: Transform.translate(
+              offset: Offset(0, -3 * lift),
+              child: Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withValues(
+                    alpha: 0.45 + 0.55 * lift,
+                  ),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }

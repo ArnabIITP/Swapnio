@@ -33,6 +33,8 @@ class _RequestPageState extends State<RequestPage>
   late final Stream<QuerySnapshot> _requestsStream;
   late final Stream<QuerySnapshot> _chatsStream;
   late final Stream<QuerySnapshot> _sessionsStream;
+  // Requests declined but still inside their undo window.
+  final Set<String> _hiddenRequestIds = {};
 
   @override
   void initState() {
@@ -148,16 +150,81 @@ class _RequestPageState extends State<RequestPage>
     );
   }
 
-  Future<void> _rejectRequest(String docId) async {
-    await FirebaseFirestore.instance
-        .collection('swipeRequests')
-        .doc(docId)
-        .delete();
+  /// Undo instead of a confirm dialog: less friction, same safety. The
+  /// request is hidden immediately and only deleted once the undo window
+  /// closes - it can't be re-created after the fact, because the rules only
+  /// let the *sender* create a request.
+  void _rejectRequest(String docId) {
+    HapticFeedback.selectionClick();
+    setState(() => _hiddenRequestIds.add(docId));
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger
+        .showSnackBar(
+          SnackBar(
+            content: const Text('Request declined'),
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'UNDO',
+              onPressed: () {
+                if (mounted) setState(() => _hiddenRequestIds.remove(docId));
+              },
+            ),
+          ),
+        )
+        .closed
+        .then((reason) {
+          if (reason == SnackBarClosedReason.action) return;
+          FirebaseFirestore.instance
+              .collection('swipeRequests')
+              .doc(docId)
+              .delete()
+              .catchError((_) {});
+        });
+  }
 
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text("Request rejected")));
+  Future<void> _acceptFromSwipe(String docId, Map<String, dynamic> data) async {
+    HapticFeedback.mediumImpact();
+    try {
+      await _acceptRequest(docId, data);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _hiddenRequestIds.remove(docId));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not accept - please try again.')),
+      );
+    }
+  }
+
+  Widget _swipeBackground({
+    required Color color,
+    required IconData icon,
+    required String label,
+    required bool alignLeft,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 28),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      alignment: alignLeft ? Alignment.centerLeft : Alignment.centerRight,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   String _getChatRoomId(String userId1, String userId2) {
@@ -791,7 +858,20 @@ class _RequestPageState extends State<RequestPage>
           );
         }
 
-        final requests = snapshot.data!.docs;
+        final requests = snapshot.data!.docs
+            .where((d) => !_hiddenRequestIds.contains(d.id))
+            .toList();
+        if (requests.isEmpty) {
+          return _buildEmptyState(
+            icon: Icons.person_add_disabled,
+            title: "No requests yet",
+            message:
+                "Requests show up here when someone likes you. Liking people "
+                "first is the fastest way to get there.",
+            actionLabel: 'Start discovering',
+            onAction: () => widget.onNavigateToTab?.call(1),
+          );
+        }
 
         return ListView.builder(
           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -805,149 +885,178 @@ class _RequestPageState extends State<RequestPage>
                 ? DateFormat.yMMMd().add_jm().format(timestamp.toDate())
                 : 'Recently';
 
-            return Container(
-              margin: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.warmBorder, width: 1),
-                boxShadow: AppTheme.softShadow,
+            // Swipe right to accept, left to decline - far quicker than
+            // reaching for the buttons. The item is hidden synchronously in
+            // onDismissed so it's never still in the tree after dismissal.
+            return Dismissible(
+              key: ValueKey('request_$docId'),
+              background: _swipeBackground(
+                color: AppTheme.primaryColor,
+                icon: Icons.check,
+                label: 'Accept',
+                alignLeft: true,
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        CachedNetworkImage(
-                          imageUrl: data["fromPhoto"] ?? "",
-                          imageBuilder: (context, imageProvider) =>
-                              CircleAvatar(
-                                radius: 32,
-                                backgroundImage: imageProvider,
-                              ),
-                          placeholder: (context, url) => CircleAvatar(
-                            radius: 32,
-                            backgroundColor: Colors.grey[300],
-                            child: const Icon(
-                              Icons.person,
-                              size: 32,
-                              color: Colors.grey,
-                            ),
-                          ),
-                          errorWidget: (context, url, error) => CircleAvatar(
-                            radius: 32,
-                            backgroundColor: Colors.grey[300],
-                            child: const Icon(
-                              Icons.person,
-                              size: 32,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 18),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                data["fromName"] ?? "User",
-                                style: GoogleFonts.ebGaramond(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppTheme.darkTextColor,
+              secondaryBackground: _swipeBackground(
+                color: AppTheme.tertiaryColor,
+                icon: Icons.close,
+                label: 'Decline',
+                alignLeft: false,
+              ),
+              onDismissed: (direction) {
+                if (direction == DismissDirection.startToEnd) {
+                  setState(() => _hiddenRequestIds.add(docId));
+                  _acceptFromSwipe(docId, data);
+                } else {
+                  _rejectRequest(docId);
+                }
+              },
+              child: Container(
+                margin: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.warmBorder, width: 1),
+                  boxShadow: AppTheme.softShadow,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          CachedNetworkImage(
+                            imageUrl: data["fromPhoto"] ?? "",
+                            imageBuilder: (context, imageProvider) =>
+                                CircleAvatar(
+                                  radius: 32,
+                                  backgroundImage: imageProvider,
                                 ),
+                            placeholder: (context, url) => CircleAvatar(
+                              radius: 32,
+                              backgroundColor: Colors.grey[300],
+                              child: const Icon(
+                                Icons.person,
+                                size: 32,
+                                color: Colors.grey,
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                formattedDate,
-                                style: GoogleFonts.manrope(
-                                  color: AppTheme.darkTextColor.withValues(
-                                    alpha: 0.7,
+                            ),
+                            errorWidget: (context, url, error) => CircleAvatar(
+                              radius: 32,
+                              backgroundColor: Colors.grey[300],
+                              child: const Icon(
+                                Icons.person,
+                                size: 32,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 18),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  data["fromName"] ?? "User",
+                                  style: GoogleFonts.ebGaramond(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.darkTextColor,
                                   ),
-                                  fontSize: 13,
                                 ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  formattedDate,
+                                  style: GoogleFonts.manrope(
+                                    color: AppTheme.darkTextColor.withValues(
+                                      alpha: 0.7,
+                                    ),
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Divider(height: 1, color: Colors.grey[200]),
+                      const SizedBox(height: 14),
+                      _buildSkillItem(
+                        "Offers",
+                        data["skillsOffered"],
+                        Icons.auto_fix_high,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildSkillItem(
+                        "Wants",
+                        data["skillsWanted"],
+                        Icons.search,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildSkillItem(
+                        "Available",
+                        data["availability"],
+                        Icons.access_time,
+                      ),
+                      const SizedBox(height: 18),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () => _rejectRequest(docId),
+                            icon: const Icon(
+                              Icons.close,
+                              color: AppTheme.tertiaryColor,
+                            ),
+                            label: const Text(
+                              'Decline',
+                              style: TextStyle(
+                                color: AppTheme.tertiaryColor,
+                                fontWeight: FontWeight.w600,
                               ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    Divider(height: 1, color: Colors.grey[200]),
-                    const SizedBox(height: 14),
-                    _buildSkillItem(
-                      "Offers",
-                      data["skillsOffered"],
-                      Icons.auto_fix_high,
-                    ),
-                    const SizedBox(height: 8),
-                    _buildSkillItem(
-                      "Wants",
-                      data["skillsWanted"],
-                      Icons.search,
-                    ),
-                    const SizedBox(height: 8),
-                    _buildSkillItem(
-                      "Available",
-                      data["availability"],
-                      Icons.access_time,
-                    ),
-                    const SizedBox(height: 18),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        OutlinedButton.icon(
-                          onPressed: () => _rejectRequest(docId),
-                          icon: const Icon(
-                            Icons.close,
-                            color: AppTheme.tertiaryColor,
-                          ),
-                          label: const Text(
-                            'Decline',
-                            style: TextStyle(
-                              color: AppTheme.tertiaryColor,
-                              fontWeight: FontWeight.w600,
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(
+                                color: AppTheme.tertiaryColor,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 10,
+                              ),
                             ),
                           ),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(
-                              color: AppTheme.tertiaryColor,
+                          const SizedBox(width: 16),
+                          ElevatedButton.icon(
+                            onPressed: () => _acceptFromSwipe(docId, data),
+                            icon: const Icon(Icons.check),
+                            label: const Text(
+                              'Accept',
+                              style: TextStyle(fontWeight: FontWeight.w600),
                             ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 10,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primaryColor,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 22,
+                                vertical: 12,
+                              ),
+                              elevation: 0,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 16),
-                        ElevatedButton.icon(
-                          onPressed: () => _acceptRequest(docId, data),
-                          icon: const Icon(Icons.check),
-                          label: const Text(
-                            'Accept',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primaryColor,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 22,
-                              vertical: 12,
-                            ),
-                            elevation: 0,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
