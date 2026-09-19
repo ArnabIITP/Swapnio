@@ -320,9 +320,8 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
               Expanded(
                 child: _buildStatCard(
                   label: 'RATING',
-                  value: (userData['rating'] ?? 0.0) is double
-                      ? (userData['rating'] as double).toStringAsFixed(1)
-                      : (userData['rating'] ?? 0.0).toString(),
+                  value: ((userData['rating'] as num?)?.toDouble() ?? 0.0)
+                      .toStringAsFixed(1),
                   icon: Icons.star,
                   iconColor: AppTheme.primaryColor,
                 ),
@@ -1171,10 +1170,41 @@ class _SettingsTabView extends StatelessWidget {
 /// (recent swap sessions, reviews received) tab - this used to be two taps
 /// away under Settings; putting it on the profile directly makes it visible
 /// without hunting for it.
-class _AchievementsTabView extends StatelessWidget {
+class _AchievementsTabView extends StatefulWidget {
   final String userId;
 
   const _AchievementsTabView({required this.userId});
+
+  @override
+  State<_AchievementsTabView> createState() => _AchievementsTabViewState();
+}
+
+class _AchievementsTabViewState extends State<_AchievementsTabView> {
+  String get userId => widget.userId;
+
+  // Built once rather than inside build(): .snapshots() returns a new Stream
+  // each call, which makes StreamBuilder re-subscribe (and flash a spinner)
+  // on every rebuild.
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _leaderboardStream;
+  late final Future<QuerySnapshot> _recentReviewsFuture;
+  late final Future<ReliabilityStatus> _reliabilityFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _leaderboardStream = FirebaseFirestore.instance
+        .collection('gamification')
+        .orderBy('points', descending: true)
+        .limit(5)
+        .snapshots();
+    _recentReviewsFuture = FirebaseFirestore.instance
+        .collection('ratings')
+        .where('toUserId', isEqualTo: widget.userId)
+        .orderBy('timestamp', descending: true)
+        .limit(5)
+        .get();
+    _reliabilityFuture = SwapSessionService.instance.myReliability();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1244,7 +1274,7 @@ class _AchievementsTabView extends StatelessWidget {
   /// record and something worth flagging.
   Widget _buildReliabilityBanner(BuildContext context) {
     return FutureBuilder<ReliabilityStatus>(
-      future: SwapSessionService.instance.myReliability(),
+      future: _reliabilityFuture,
       builder: (context, snapshot) {
         final status = snapshot.data;
         if (status == null || status.total < 3 || status.showUpRate >= 80) {
@@ -1443,12 +1473,7 @@ class _AchievementsTabView extends StatelessWidget {
 
   Widget _buildRecentReviews(BuildContext context) {
     return FutureBuilder<QuerySnapshot>(
-      future: FirebaseFirestore.instance
-          .collection('ratings')
-          .where('toUserId', isEqualTo: userId)
-          .orderBy('timestamp', descending: true)
-          .limit(5)
-          .get(),
+      future: _recentReviewsFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -1484,11 +1509,7 @@ class _AchievementsTabView extends StatelessWidget {
   /// Top 5 users by gamification points.
   Widget _buildLeaderboard(BuildContext context) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('gamification')
-          .orderBy('points', descending: true)
-          .limit(5)
-          .snapshots(),
+      stream: _leaderboardStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());

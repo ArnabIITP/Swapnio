@@ -9,10 +9,16 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../services/safety_service.dart';
 import '../../services/match_service.dart';
 import '../../theme.dart';
+import '../../ui/celebration.dart';
+import 'setup.dart';
+import 'user_detail.dart';
 import 'dart:math' show pi;
 
 class Swap extends StatefulWidget {
-  const Swap({Key? key}) : super(key: key);
+  /// Lets the match celebration jump straight to the Chats tab.
+  final ValueChanged<int>? onNavigateToTab;
+
+  const Swap({Key? key, this.onNavigateToTab}) : super(key: key);
 
   @override
   State<Swap> createState() => _SwapState();
@@ -34,6 +40,16 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
   double _dragX = 0;
   double _dragY = 0;
   double _dragRotation = 0.0;
+  // Browsing used to live in a separate Home tab doing the same job; it's now
+  // a mode of Discover for people who'd rather scan a list than swipe.
+  bool _listMode = false;
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+  // Swipe-up-to-favourite is invisible unless we teach it once.
+  bool _showCoachmarks = false;
+  // Built once, not in build(): a stream created during build is a new object
+  // every rebuild, forcing StreamBuilder to re-subscribe each time.
+  Stream<QuerySnapshot>? _likesYouStream;
 
   @override
   void initState() {
@@ -42,12 +58,66 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
       duration: const Duration(milliseconds: 350),
       vsync: this,
     );
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    if (myUid != null) {
+      _likesYouStream = FirebaseFirestore.instance
+          .collection('swipeRequests')
+          .where('toUserId', isEqualTo: myUid)
+          .snapshots();
+    }
     _loadUsers();
+    _maybeShowCoachmarks();
+  }
+
+  Future<void> _maybeShowCoachmarks() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final doc =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      if (doc.data()?['hasSeenSwipeCoachmarks'] == true) return;
+      if (mounted) setState(() => _showCoachmarks = true);
+    } catch (_) {
+      // Never block the deck on this.
+    }
+  }
+
+  Future<void> _dismissCoachmarks() async {
+    setState(() => _showCoachmarks = false);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .set({'hasSeenSwipeCoachmarks': true}, SetOptions(merge: true));
+    } catch (_) {
+      // Worst case they see the hint again next launch.
+    }
+  }
+
+  List<Map<String, dynamic>> get _searchResults {
+    if (_searchQuery.trim().isEmpty) return _users;
+    final query = _searchQuery.toLowerCase();
+    return _users.where((user) {
+      final name = (user['name'] ?? '').toString().toLowerCase();
+      final bio = (user['bio'] ?? '').toString().toLowerCase();
+      final offered = List<String>.from(user['skillsOffered'] ?? [])
+          .join(' ')
+          .toLowerCase();
+      final wanted =
+          List<String>.from(user['skillsWanted'] ?? []).join(' ').toLowerCase();
+      return name.contains(query) ||
+          bio.contains(query) ||
+          offered.contains(query) ||
+          wanted.contains(query);
+    }).toList();
   }
 
   @override
   void dispose() {
     _animationController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -251,50 +321,15 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
   }
 
   void _showMatchDialog(String name) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.favorite,
-                size: 64,
-                color: AppTheme.primaryColor,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                "It's a Match!",
-                style: GoogleFonts.ebGaramond(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.primaryColor,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'You and $name liked each other. '
-                'Check your Requests tab to start chatting!',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 15),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Keep Swiping'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    showCelebrationDialog(
+      context,
+      icon: Icons.favorite,
+      headline: "It's a Match!",
+      message: 'You and $name liked each other. '
+          'Say hi before the moment passes.',
+      primaryLabel: 'Say hi →',
+      onPrimary: () => widget.onNavigateToTab?.call(2),
+      secondaryLabel: 'Keep swiping',
     );
   }
 
@@ -507,13 +542,9 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
   /// deck isn't the only way to discover interest - visible even before
   /// swiping past those exact profiles.
   Widget _buildLikesYouBadge() {
-    final myUid = FirebaseAuth.instance.currentUser?.uid;
-    if (myUid == null) return const SizedBox.shrink();
+    if (_likesYouStream == null) return const SizedBox.shrink();
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('swipeRequests')
-          .where('toUserId', isEqualTo: myUid)
-          .snapshots(),
+      stream: _likesYouStream,
       builder: (context, snapshot) {
         final count = snapshot.data?.docs.length ?? 0;
         if (count == 0) return const SizedBox.shrink();
@@ -577,50 +608,246 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
         actions: [
           _buildLikesYouBadge(),
           IconButton(
+            icon: Icon(_listMode ? Icons.style : Icons.view_list,
+                color: AppTheme.primaryColor),
+            tooltip: _listMode ? 'Swipe view' : 'List view',
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              setState(() => _listMode = !_listMode);
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh, color: AppTheme.primaryColor),
             onPressed: _isLoading ? null : _loadUsers,
             tooltip: 'Refresh matches',
           ),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final screenWidth = constraints.maxWidth;
-          final screenHeight = constraints.maxHeight;
-          final isVerticalDrag = _dragY.abs() > _dragX.abs() * 1.5;
+      body: Stack(
+        children: [
+          _listMode ? _buildListMode() : _buildDeckMode(),
+          if (_showCoachmarks && !_listMode) _buildCoachmarks(),
+        ],
+      ),
+    );
+  }
 
-          // Calculate progress from 0.0 to 1.0 based on how far the card is dragged
-          final likeProgress = !isVerticalDrag ? (_dragX / (screenWidth * 0.5)).clamp(0.0, 1.0) : 0.0;
-          final dislikeProgress = !isVerticalDrag ? (-_dragX / (screenWidth * 0.5)).clamp(0.0, 1.0) : 0.0;
-          final favoriteProgress = isVerticalDrag ? (-_dragY / (screenHeight * 0.4)).clamp(0.0, 1.0) : 0.0;
+  Widget _buildDeckMode() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenWidth = constraints.maxWidth;
+        final screenHeight = constraints.maxHeight;
+        final isVerticalDrag = _dragY.abs() > _dragX.abs() * 1.5;
 
-          return _isLoading
-              ? _buildLoadingState()
-              : _users.isEmpty || _currentIndex >= _users.length
+        // Calculate progress from 0.0 to 1.0 based on how far the card is dragged
+        final likeProgress = !isVerticalDrag ? (_dragX / (screenWidth * 0.5)).clamp(0.0, 1.0) : 0.0;
+        final dislikeProgress = !isVerticalDrag ? (-_dragX / (screenWidth * 0.5)).clamp(0.0, 1.0) : 0.0;
+        final favoriteProgress = isVerticalDrag ? (-_dragY / (screenHeight * 0.4)).clamp(0.0, 1.0) : 0.0;
+
+        return _isLoading
+            ? _buildLoadingState()
+            : _users.isEmpty || _currentIndex >= _users.length
+            ? _buildEmptyState()
+            : Column(
+          children: [
+            Expanded(
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  if (_currentIndex + 1 < _users.length)
+                    _buildSwipeCard(
+                      _users[_currentIndex + 1],
+                      isBackCard: true,
+                    ),
+                  _buildSwipeCard(_users[_currentIndex]),
+                ],
+              ),
+            ),
+            _buildActionButtons(
+              likeProgress: likeProgress,
+              dislikeProgress: dislikeProgress,
+              favoriteProgress: favoriteProgress,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Browse/search mode - the old Home feed, folded in here so discovery
+  /// lives in exactly one place.
+  Widget _buildListMode() {
+    if (_isLoading) return _buildLoadingState();
+    final results = _searchResults;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Search people or skills...',
+              prefixIcon: const Icon(Icons.search, color: AppTheme.primaryColor),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _searchQuery = '');
+                      },
+                    )
+                  : null,
+              filled: true,
+              fillColor: Theme.of(context).colorScheme.surface,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: AppTheme.warmBorder),
+              ),
+            ),
+            onChanged: (value) => setState(() => _searchQuery = value),
+          ),
+        ),
+        Expanded(
+          child: results.isEmpty
               ? _buildEmptyState()
-              : Column(
-            children: [
-              Expanded(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    if (_currentIndex + 1 < _users.length)
-                      _buildSwipeCard(
-                        _users[_currentIndex + 1],
-                        isBackCard: true,
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: results.length,
+                  itemBuilder: (context, index) {
+                    final user = results[index];
+                    // Stagger-fade so the list assembles rather than snapping in.
+                    return TweenAnimationBuilder<double>(
+                      key: ValueKey(user['id']),
+                      tween: Tween(begin: 0, end: 1),
+                      duration: Duration(milliseconds: 250 + (index % 6) * 60),
+                      curve: Curves.easeOut,
+                      builder: (context, value, child) => Opacity(
+                        opacity: value,
+                        child: Transform.translate(
+                          offset: Offset(0, 12 * (1 - value)),
+                          child: child,
+                        ),
                       ),
-                    _buildSwipeCard(_users[_currentIndex]),
-                  ],
+                      child: _buildListTile(user),
+                    );
+                  },
                 ),
-              ),
-              _buildActionButtons(
-                likeProgress: likeProgress,
-                dislikeProgress: dislikeProgress,
-                favoriteProgress: favoriteProgress,
-              ),
-            ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildListTile(Map<String, dynamic> user) {
+    final offered = List<String>.from(user['skillsOffered'] ?? []);
+    final percent = (user['matchPercent'] as double?) ?? 0;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        leading: CircleAvatar(
+          radius: 24,
+          backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.12),
+          backgroundImage: (user['photoUrl'] as String?)?.isNotEmpty == true
+              ? NetworkImage(user['photoUrl'])
+              : null,
+          child: (user['photoUrl'] as String?)?.isNotEmpty == true
+              ? null
+              : const Icon(Icons.person, color: AppTheme.primaryColor),
+        ),
+        title: Text(user['name'] ?? 'Anonymous',
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text(
+          offered.isEmpty ? 'No skills listed' : 'Teaches ${offered.join(', ')}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: percent > 0
+            ? Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${percent.round()}%',
+                  style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.primaryColor),
+                ),
+              )
+            : null,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => UserDetailPage(userId: user['id']),
+            ),
           );
         },
+      ),
+    );
+  }
+
+  /// One-time gesture tutorial. Swipe-up-to-favourite in particular is
+  /// impossible to discover without being told.
+  Widget _buildCoachmarks() {
+    return Positioned.fill(
+      child: GestureDetector(
+        onTap: _dismissCoachmarks,
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.78),
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.swipe, color: Colors.white, size: 54),
+              const SizedBox(height: 22),
+              const Text(
+                'How to swap',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 26),
+              _coachRow(Icons.arrow_forward, 'Swipe right to send a request'),
+              _coachRow(Icons.arrow_back, 'Swipe left to pass'),
+              _coachRow(Icons.arrow_upward, 'Swipe up to save as a favourite'),
+              _coachRow(Icons.undo, 'Tap undo to bring back the last card'),
+              const SizedBox(height: 30),
+              ElevatedButton(
+                onPressed: _dismissCoachmarks,
+                child: const Text('Got it'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _coachRow(IconData icon, String label) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(9),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryColor.withValues(alpha: 0.25),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: Colors.white, size: 19),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(color: Colors.white, fontSize: 14.5)),
+          ),
+        ],
       ),
     );
   }
@@ -664,19 +891,35 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
             ),
             const SizedBox(height: 16),
             Text(
-              "We've run out of potential skill matches. Check back later or update your profile to find more!",
+              _searchQuery.isNotEmpty
+                  ? 'Nothing matched "$_searchQuery". Try a different skill or clear the search.'
+                  : "You've seen everyone for now. Adding more skills you want to "
+                      'learn widens your matches straight away.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey[600]),
             ),
             const SizedBox(height: 32),
+            // Every empty state should name the next action, not dead-end.
             ElevatedButton.icon(
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ProfileSetupPage()),
+                );
+              },
+              icon: const Icon(Icons.edit),
+              label: const Text('Update my skills'),
+              style: ElevatedButton.styleFrom(
+                padding:
+                const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextButton.icon(
               onPressed: _loadUsers,
               icon: const Icon(Icons.refresh),
               label: const Text("Refresh"),
-              style: ElevatedButton.styleFrom(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-              ),
             ),
           ],
         ),
@@ -916,8 +1159,11 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
     final skillsOffered = List<String>.from(user['skillsOffered'] ?? []);
     final skillsWanted = List<String>.from(user['skillsWanted'] ?? []);
     final availability = List<String>.from(user['availability'] ?? []);
-    final rating = (user['rating'] as num).toDouble();
-    final completedSwaps = user['completedSwaps'] as int;
+    // Never hard-cast a Firestore number: the same field comes back as int
+    // or double depending on how it was written, which is exactly what
+    // crashed the admin user list in production.
+    final rating = (user['rating'] as num?)?.toDouble() ?? 0.0;
+    final completedSwaps = (user['completedSwaps'] as num?)?.toInt() ?? 0;
 
     return SizedBox(
       width: MediaQuery.of(context).size.width * 0.87,

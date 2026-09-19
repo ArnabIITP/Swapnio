@@ -38,6 +38,12 @@ class _ChatPageState extends State<ChatPage> {
   String? _completedSwapId;
   final TextEditingController _reviewController = TextEditingController();
   final Set<String> _selectedFeedbackTags = {};
+  // Created once, NOT inside build(): calling .snapshots() during build
+  // returns a new Stream object each time, so StreamBuilder would tear down
+  // and re-subscribe on every rebuild - which is what made the chat flash a
+  // loading spinner constantly.
+  late final Stream<QuerySnapshot> _messagesStream;
+  int _lastMessageCount = 0;
 
   static const List<String> _feedbackTagOptions = [
     'Punctual',
@@ -51,6 +57,12 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    _messagesStream = FirebaseFirestore.instance
+        .collection('chatRooms')
+        .doc(widget.chatRoomId)
+        .collection('messages')
+        .orderBy('timestamp')
+        .snapshots();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _markMessagesAsRead();
       _loadCompletedSession();
@@ -100,6 +112,7 @@ class _ChatPageState extends State<ChatPage> {
 
     final messageText = _messageController.text.trim();
     _messageController.clear();
+    HapticFeedback.lightImpact();
 
     try {
       // Add message to the chat room's messages collection
@@ -346,14 +359,13 @@ class _ChatPageState extends State<ChatPage> {
           // Messages
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('chatRooms')
-                  .doc(widget.chatRoomId)
-                  .collection('messages')
-                  .orderBy('timestamp')
-                  .snapshots(),
+              stream: _messagesStream,
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+                // Only the very first load shows a spinner. Re-checking
+                // `waiting` on every build is what made the chat appear to
+                // reload constantly.
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    !snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
@@ -362,9 +374,14 @@ class _ChatPageState extends State<ChatPage> {
                   );
                 }
                 final messages = snapshot.data!.docs;
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _scrollToBottom();
-                });
+                // Auto-scroll only when a message actually arrives, instead of
+                // animating on every single rebuild.
+                if (messages.length != _lastMessageCount) {
+                  _lastMessageCount = messages.length;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _scrollToBottom();
+                  });
+                }
                 final items = <Widget>[];
                 DateTime? lastDay;
                 for (final doc in messages) {

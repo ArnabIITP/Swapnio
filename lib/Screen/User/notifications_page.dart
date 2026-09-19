@@ -15,9 +15,19 @@ class NotificationsPage extends StatefulWidget {
 }
 
 class _NotificationsPageState extends State<NotificationsPage> {
+  // Built once: a stream created inside build() is a new object on every
+  // rebuild, so StreamBuilder would re-subscribe and flash its loading state.
+  late final Stream<QuerySnapshot> _notificationsStream;
+
   @override
   void initState() {
     super.initState();
+    _notificationsStream = FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid ?? '')
+        .orderBy('timestamp', descending: true)
+        .limit(50)
+        .snapshots();
     // Mark all notifications as read when the page opens.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<AppState>(context, listen: false).markNotificationsAsRead();
@@ -31,12 +41,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       backgroundColor: AppTheme.backgroundLight,
       appBar: AppBar(title: const Text('Notifications')),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('notifications')
-            .where('userId', isEqualTo: userId)
-            .orderBy('timestamp', descending: true)
-            .limit(50)
-            .snapshots(),
+        stream: _notificationsStream,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
