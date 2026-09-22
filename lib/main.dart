@@ -114,6 +114,9 @@ class _MyAppState extends State<MyApp> {
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: appState.themeMode,
+            // Applied instantly: the cross-fade could be interrupted by a
+            // route pop and leave the app stuck between the two palettes.
+            themeAnimationDuration: Duration.zero,
             routes: featureRoutes,
             home: _splashDone
                 ? _buildMainContent(appState)

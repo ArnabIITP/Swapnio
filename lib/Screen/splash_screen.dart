@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme.dart';
+import '../ui/swapnio_widgets.dart';
 
 /// Animated splash screen shown on app launch.
 ///
@@ -46,7 +47,6 @@ class _SplashScreenState extends State<SplashScreen>
   late final AnimationController _exitController;
 
   // ── Animations ───────────────────────────────────────────────────────
-  late final Animation<double> _logoScale;
   late final Animation<double> _logoOpacity;
   late final Animation<Offset> _nameSlide;
   late final Animation<double> _nameOpacity;
@@ -67,9 +67,6 @@ class _SplashScreenState extends State<SplashScreen>
     _logoController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
-    );
-    _logoScale = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _logoController, curve: Curves.elasticOut),
     );
     _logoOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
@@ -144,9 +141,8 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? AppTheme.darkBackground : AppTheme.backgroundLight;
-    final textColor = isDark ? AppTheme.darkText : AppTheme.darkTextColor;
+    final bgColor = context.sw.bg;
+    final textColor = context.sw.text;
 
     return FadeTransition(
       opacity: _exitOpacity,
@@ -159,31 +155,7 @@ class _SplashScreenState extends State<SplashScreen>
               // ── Logo ───────────────────────────────────────────────
               FadeTransition(
                 opacity: _logoOpacity,
-                child: ScaleTransition(
-                  scale: _logoScale,
-                  child: Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(28),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.primaryColor.withValues(alpha: 0.25),
-                          blurRadius: 30,
-                          spreadRadius: 0,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(28),
-                      child: Image.asset(
-                        'assets/icons/LOGO.png',
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
-                ),
+                child: const AnimatedSwapnioMark(size: 122),
               ),
 
               const SizedBox(height: 28),
@@ -195,11 +167,11 @@ class _SplashScreenState extends State<SplashScreen>
                   opacity: _nameOpacity,
                   child: Text(
                     'Swapnio',
-                    style: GoogleFonts.ebGaramond(
+                    style: GoogleFonts.fraunces(
                       fontSize: 48,
                       fontWeight: FontWeight.bold,
-                      color: AppTheme.primaryColor,
-                      letterSpacing: 1,
+                      color: textColor,
+                      letterSpacing: 0.5,
                     ),
                   ),
                 ),
@@ -210,14 +182,29 @@ class _SplashScreenState extends State<SplashScreen>
               // ── Tagline ────────────────────────────────────────────
               FadeTransition(
                 opacity: _taglineOpacity,
-                child: Text(
-                  'Swap skills, grow together',
-                  style: GoogleFonts.manrope(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                    color: textColor.withValues(alpha: 0.6),
-                    letterSpacing: 0.5,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Teach',
+                      style: GoogleFonts.manrope(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: context.sw.give,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(Icons.swap_horiz_rounded, size: 17, color: context.sw.textMuted),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Learn',
+                      style: GoogleFonts.manrope(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: context.sw.get,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

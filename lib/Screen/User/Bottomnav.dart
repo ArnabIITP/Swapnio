@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:curved_navigation_bar/curved_navigation_bar.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'package:swapnio/Screen/User/home_dashboard.dart';
 import 'package:swapnio/Screen/User/setup.dart';
@@ -93,11 +93,11 @@ class _BottomNavPageState extends State<BottomNavPage> {
     const ProfilePage(),
   ];
 
-  static const List<IconData> _icons = [
-    Icons.home_outlined,
-    Icons.explore_outlined,
-    Icons.forum_outlined,
-    Icons.person_outline,
+  static const List<_Tab> _tabs = [
+    _Tab('Home', Icons.home_outlined, Icons.home_rounded),
+    _Tab('Discover', Icons.explore_outlined, Icons.explore),
+    _Tab('Chats', Icons.forum_outlined, Icons.forum_rounded),
+    _Tab('Profile', Icons.person_outline, Icons.person_rounded),
   ];
 
   void _goToTab(int index) {
@@ -134,7 +134,7 @@ class _BottomNavPageState extends State<BottomNavPage> {
             duration: const Duration(milliseconds: 250),
             child: _offline
                 ? Material(
-                    color: Colors.grey.shade800,
+                    color: context.sw.ink,
                     child: SafeArea(
                       bottom: false,
                       child: Padding(
@@ -162,66 +162,132 @@ class _BottomNavPageState extends State<BottomNavPage> {
           ),
         ],
       ),
-      bottomNavigationBar: CurvedNavigationBar(
-        index: _selectedIndex,
-        height: 62,
-        backgroundColor: theme.scaffoldBackgroundColor,
-        color: theme.colorScheme.surface,
-        buttonBackgroundColor: AppTheme.primaryColor,
-        animationDuration: const Duration(milliseconds: 350),
-        onTap: (index) {
-          if (index == _selectedIndex) {
-            HapticFeedback.selectionClick();
-            _scrollCurrentTabToTop();
-            return;
-          }
-          HapticFeedback.selectionClick();
-          setState(() => _selectedIndex = index);
-        },
-        items: [
-          _navIcon(_icons[0], 0),
-          _navIcon(_icons[1], 1),
-          _navIcon(_icons[2], 2, badge: unread),
-          _navIcon(_icons[3], 3),
-        ],
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: context.sw.ink,
+              borderRadius: BorderRadius.circular(32),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                for (var i = 0; i < _tabs.length; i++)
+                  _navItem(i, badge: i == 2 ? unread : null),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 
-  Widget _navIcon(IconData icon, int index, {int? badge}) {
+  void _onTabTap(int index) {
+    HapticFeedback.selectionClick();
+    if (index == _selectedIndex) {
+      _scrollCurrentTabToTop();
+      return;
+    }
+    setState(() => _selectedIndex = index);
+  }
+
+  Widget _navItem(int index, {int? badge}) {
+    final c = context.sw;
     final selected = _selectedIndex == index;
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Icon(
-          icon,
-          size: 26,
-          color: selected ? Colors.white : AppTheme.warmMutedText,
-        ),
-        if (badge != null && badge > 0)
-          Positioned(
-            right: -8,
-            top: -4,
-            child: Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: Colors.redAccent,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 1.5),
-              ),
-              constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-              child: Text(
-                badge > 9 ? '9+' : '$badge',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
+    final tab = _tabs[index];
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: tab.label,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _onTabTap(index),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+          height: 48,
+          padding: EdgeInsets.symmetric(horizontal: selected ? 18 : 14),
+          decoration: BoxDecoration(
+            color: selected ? c.win : Colors.transparent,
+            borderRadius: BorderRadius.circular(24),
           ),
-      ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(
+                    selected ? tab.activeIcon : tab.icon,
+                    size: 23,
+                    color: selected
+                        ? c.onWin
+                        : Colors.white.withValues(alpha: 0.55),
+                  ),
+                  if (badge != null && badge > 0)
+                    Positioned(
+                      right: -7,
+                      top: -5,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                        decoration: BoxDecoration(
+                          color: c.give,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: c.ink, width: 1.5),
+                        ),
+                        child: Text(
+                          badge > 9 ? '9+' : '$badge',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 320),
+                curve: Curves.easeOutCubic,
+                child: selected
+                    ? Padding(
+                        padding: const EdgeInsets.only(left: 7),
+                        child: Text(
+                          tab.label,
+                          style: GoogleFonts.manrope(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: c.onWin,
+                          ),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
+}
+
+class _Tab {
+  final String label;
+  final IconData icon;
+  final IconData activeIcon;
+  const _Tab(this.label, this.icon, this.activeIcon);
 }
