@@ -1,291 +1,344 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+/// Swapnio "Give / Get" palette: vermilion is what you teach, violet is what
+/// you learn, lime is reserved for wins and live moments.
+@immutable
+class SwapnioColors extends ThemeExtension<SwapnioColors> {
+  final Color bg;
+  final Color surface;
+  final Color surfaceLow;
+  final Color ink;
+  final Color text;
+  final Color textMuted;
+  final Color border;
+  final Color give;
+  final Color get;
+  final Color win;
+  final Color onWin;
+  final Color cta;
+  final Color onCta;
+  final Color success;
+
+  const SwapnioColors({
+    required this.bg,
+    required this.surface,
+    required this.surfaceLow,
+    required this.ink,
+    required this.text,
+    required this.textMuted,
+    required this.border,
+    required this.give,
+    required this.get,
+    required this.win,
+    required this.onWin,
+    required this.cta,
+    required this.onCta,
+    required this.success,
+  });
+
+  static const light = SwapnioColors(
+    bg: Color(0xFFF3F0E8),
+    surface: Color(0xFFFFFFFF),
+    surfaceLow: Color(0xFFEAE6DC),
+    ink: Color(0xFF17142B),
+    text: Color(0xFF17142B),
+    textMuted: Color(0xFF6E6A7C),
+    border: Color(0xFFDDD8CC),
+    give: Color(0xFFFF5A36),
+    get: Color(0xFF6C5CE7),
+    win: Color(0xFFD4F25A),
+    onWin: Color(0xFF17142B),
+    cta: Color(0xFF17142B),
+    onCta: Color(0xFFFFFFFF),
+    success: Color(0xFF2F9E6A),
+  );
+
+  static const dark = SwapnioColors(
+    bg: Color(0xFF0E0C17),
+    surface: Color(0xFF1A1726),
+    surfaceLow: Color(0xFF262236),
+    ink: Color(0xFF2B2645),
+    text: Color(0xFFF3F0E8),
+    textMuted: Color(0xFF9A96AB),
+    border: Color(0xFF2E2A40),
+    give: Color(0xFFFF6B4A),
+    get: Color(0xFF8B7DFF),
+    win: Color(0xFFD4F25A),
+    onWin: Color(0xFF17142B),
+    cta: Color(0xFFF3F0E8),
+    onCta: Color(0xFF17142B),
+    success: Color(0xFF4CC38A),
+  );
+
+  @override
+  SwapnioColors copyWith({
+    Color? bg,
+    Color? surface,
+    Color? surfaceLow,
+    Color? ink,
+    Color? text,
+    Color? textMuted,
+    Color? border,
+    Color? give,
+    Color? get,
+    Color? win,
+    Color? onWin,
+    Color? cta,
+    Color? onCta,
+    Color? success,
+  }) =>
+      SwapnioColors(
+        bg: bg ?? this.bg,
+        surface: surface ?? this.surface,
+        surfaceLow: surfaceLow ?? this.surfaceLow,
+        ink: ink ?? this.ink,
+        text: text ?? this.text,
+        textMuted: textMuted ?? this.textMuted,
+        border: border ?? this.border,
+        give: give ?? this.give,
+        get: get ?? this.get,
+        win: win ?? this.win,
+        onWin: onWin ?? this.onWin,
+        cta: cta ?? this.cta,
+        onCta: onCta ?? this.onCta,
+        success: success ?? this.success,
+      );
+
+  @override
+  SwapnioColors lerp(ThemeExtension<SwapnioColors>? other, double t) {
+    if (other is! SwapnioColors) return this;
+    Color l(Color a, Color b) => Color.lerp(a, b, t)!;
+    return SwapnioColors(
+      bg: l(bg, other.bg),
+      surface: l(surface, other.surface),
+      surfaceLow: l(surfaceLow, other.surfaceLow),
+      ink: l(ink, other.ink),
+      text: l(text, other.text),
+      textMuted: l(textMuted, other.textMuted),
+      border: l(border, other.border),
+      give: l(give, other.give),
+      get: l(get, other.get),
+      win: l(win, other.win),
+      onWin: l(onWin, other.onWin),
+      cta: l(cta, other.cta),
+      onCta: l(onCta, other.onCta),
+      success: l(success, other.success),
+    );
+  }
+}
+
+extension SwapnioContext on BuildContext {
+  SwapnioColors get sw =>
+      Theme.of(this).extension<SwapnioColors>() ?? SwapnioColors.light;
+}
+
 class AppTheme {
   AppTheme._();
 
-  // Sahara - Warm Minimalism Palette
-  static const Color primaryColor = Color(0xFFC2652A); // Burnt sienna
-  static const Color backgroundLight = Color(0xFFFAF5EE); // Warm linen
-  static const Color backgroundDarker = Color(0xFFF6F0E8); // surface_container_low
-  static const Color tertiaryColor = Color(0xFF8C3C3C); // Dusty rose
-  static const Color warmBorder = Color(0x99D8D0C8); // #d8d0c8 at 60% opacity
-  static const Color darkTextColor = Color(0xFF3A302A); // warm dark gray
-  static const Color warmMutedText = Color(0xFF9A9088);
-  // Dark (night) palette - Sahara in the dark
-  static const Color darkBackground = Color(0xFF2A211D);
-  static const Color darkSurface = Color(0xFF3A2E28);
-  static const Color darkText = Color(0xFFF2E9DF);
-  static const Color darkBorder = Color(0x66D8D0C8);
+  // Static aliases kept for screens that predate the theme extension. They
+  // resolve to the light palette; theme-aware code should use `context.sw`.
+  static const Color primaryColor = Color(0xFFFF5A36);
+  static const Color giveColor = Color(0xFFFF5A36);
+  static const Color getColor = Color(0xFF6C5CE7);
+  static const Color winColor = Color(0xFFD4F25A);
+  static const Color inkColor = Color(0xFF17142B);
+  static const Color backgroundLight = Color(0xFFF3F0E8);
+  static const Color backgroundDarker = Color(0xFFEAE6DC);
+  static const Color tertiaryColor = Color(0xFF6C5CE7);
+  static const Color warmBorder = Color(0x99DDD8CC);
+  static const Color darkTextColor = Color(0xFF17142B);
+  static const Color warmMutedText = Color(0xFF6E6A7C);
+  static const Color darkBackground = Color(0xFF0E0C17);
+  static const Color darkSurface = Color(0xFF1A1726);
+  static const Color darkText = Color(0xFFF3F0E8);
+  static const Color darkBorder = Color(0xFF2E2A40);
 
-  static final ThemeData lightTheme = ThemeData(
-    useMaterial3: true,
-    brightness: Brightness.light,
-    primaryColor: primaryColor,
-    scaffoldBackgroundColor: backgroundLight,
-    
-    colorScheme: const ColorScheme.light(
-      primary: primaryColor,
-      onPrimary: Colors.white,
-      secondary: tertiaryColor,
-      onSecondary: Colors.white,
-      error: Color(0xFFC0392B),
-      surface: Colors.white,
-      onSurface: darkTextColor,
-    ),
+  static TextStyle display({
+    double fontSize = 28,
+    Color? color,
+    FontWeight fontWeight = FontWeight.w700,
+    double? height,
+  }) =>
+      GoogleFonts.fraunces(
+        fontSize: fontSize,
+        color: color,
+        fontWeight: fontWeight,
+        height: height,
+      );
 
-    // Typography
-    textTheme: GoogleFonts.manropeTextTheme(ThemeData.light().textTheme).apply(
-      bodyColor: darkTextColor,
-      displayColor: darkTextColor,
-    ).copyWith(
-      displayLarge: GoogleFonts.ebGaramond(color: darkTextColor, fontWeight: FontWeight.bold),
-      displayMedium: GoogleFonts.ebGaramond(color: darkTextColor, fontWeight: FontWeight.bold),
-      displaySmall: GoogleFonts.ebGaramond(color: darkTextColor, fontWeight: FontWeight.bold),
-      headlineLarge: GoogleFonts.ebGaramond(color: darkTextColor, fontWeight: FontWeight.bold),
-      headlineMedium: GoogleFonts.ebGaramond(color: darkTextColor, fontWeight: FontWeight.bold),
-      headlineSmall: GoogleFonts.ebGaramond(color: darkTextColor, fontWeight: FontWeight.w600),
-      titleLarge: GoogleFonts.ebGaramond(color: darkTextColor, fontWeight: FontWeight.w600),
-      titleMedium: GoogleFonts.ebGaramond(color: darkTextColor, fontWeight: FontWeight.w600),
-    ),
+  static TextStyle label({
+    double fontSize = 11,
+    Color? color,
+    FontWeight fontWeight = FontWeight.w800,
+  }) =>
+      GoogleFonts.manrope(
+        fontSize: fontSize,
+        color: color,
+        fontWeight: fontWeight,
+        letterSpacing: 1.2,
+      );
 
-    appBarTheme: AppBarTheme(
-      backgroundColor: backgroundLight,
-      foregroundColor: darkTextColor,
-      elevation: 0,
-      centerTitle: true,
-      titleTextStyle: GoogleFonts.ebGaramond(
-        fontSize: 24,
-        fontWeight: FontWeight.w600,
-        color: darkTextColor,
-        letterSpacing: 0,
+  static ThemeData _build(SwapnioColors c, Brightness b) {
+    final base = b == Brightness.dark ? ThemeData.dark() : ThemeData.light();
+    final radius = BorderRadius.circular(16);
+    TextStyle disp(FontWeight w) => GoogleFonts.fraunces(color: c.text, fontWeight: w);
+    return ThemeData(
+      useMaterial3: true,
+      brightness: b,
+      primaryColor: c.give,
+      scaffoldBackgroundColor: c.bg,
+      extensions: [c],
+      colorScheme: (b == Brightness.dark
+              ? const ColorScheme.dark()
+              : const ColorScheme.light())
+          .copyWith(
+        primary: c.give,
+        onPrimary: Colors.white,
+        secondary: c.get,
+        onSecondary: Colors.white,
+        tertiary: c.win,
+        onTertiary: c.onWin,
+        error: const Color(0xFFD64545),
+        surface: c.surface,
+        onSurface: c.text,
+        surfaceContainerLowest: c.surface,
+        surfaceContainerLow: c.surfaceLow,
+        surfaceContainer: c.surfaceLow,
+        surfaceContainerHigh: c.surfaceLow,
+        outline: c.border,
+        outlineVariant: c.border,
       ),
-      iconTheme: const IconThemeData(color: primaryColor),
-    ),
-
-    elevatedButtonTheme: ElevatedButtonThemeData(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.white,
-        textStyle: GoogleFonts.manrope(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.5,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+      textTheme: GoogleFonts.manropeTextTheme(base.textTheme)
+          .apply(bodyColor: c.text, displayColor: c.text)
+          .copyWith(
+            displayLarge: disp(FontWeight.w700),
+            displayMedium: disp(FontWeight.w700),
+            displaySmall: disp(FontWeight.w700),
+            headlineLarge: disp(FontWeight.w700),
+            headlineMedium: disp(FontWeight.w700),
+            headlineSmall: disp(FontWeight.w600),
+            titleLarge: disp(FontWeight.w600),
+            titleMedium: disp(FontWeight.w600),
+          ),
+      appBarTheme: AppBarTheme(
+        backgroundColor: c.bg,
+        foregroundColor: c.text,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
-      ),
-    ),
-
-    outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: primaryColor,
-        side: const BorderSide(color: warmBorder, width: 1.5),
-        textStyle: GoogleFonts.manrope(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+        titleSpacing: 20,
+        titleTextStyle: GoogleFonts.fraunces(
+          fontSize: 26,
+          fontWeight: FontWeight.w700,
+          color: c.text,
         ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+        iconTheme: IconThemeData(color: c.text),
       ),
-    ),
-
-    textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(
-        foregroundColor: primaryColor,
-        textStyle: GoogleFonts.manrope(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    ),
-
-    inputDecorationTheme: InputDecorationTheme(
-      filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: warmBorder, width: 1),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: warmBorder, width: 1),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: primaryColor, width: 2),
-      ),
-      hintStyle: GoogleFonts.manrope(
-        color: const Color(0xFF9A9088),
-      ),
-    ),
-
-    iconTheme: const IconThemeData(
-      color: primaryColor,
-    ),
-
-    tabBarTheme: TabBarThemeData(
-      labelColor: primaryColor,
-      unselectedLabelColor: warmMutedText,
-      labelStyle: GoogleFonts.manrope(
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-      ),
-      unselectedLabelStyle: GoogleFonts.manrope(
-        fontSize: 14,
-        fontWeight: FontWeight.w500,
-      ),
-      indicatorColor: primaryColor,
-      indicatorSize: TabBarIndicatorSize.label,
-      dividerColor: Colors.transparent,
-      dividerHeight: 0,
-    ),
-  );
-  
-  // Sahara - Dark theme
-  static final ThemeData darkTheme = ThemeData(
-    useMaterial3: true,
-    brightness: Brightness.dark,
-    primaryColor: primaryColor,
-    scaffoldBackgroundColor: darkBackground,
-
-    colorScheme: const ColorScheme.dark(
-      primary: Color(0xFFD9864F),
-      onPrimary: Colors.black,
-      secondary: Color(0xFFB86A6A),
-      onSecondary: Colors.white,
-      error: Color(0xFFC0392B),
-      surface: darkSurface,
-      onSurface: darkText,
-    ),
-
-    // Typography
-    textTheme: GoogleFonts.manropeTextTheme(ThemeData.light().textTheme).apply(
-      bodyColor: darkText,
-      displayColor: darkText,
-    ).copyWith(
-      displayLarge: GoogleFonts.ebGaramond(color: darkText, fontWeight: FontWeight.bold),
-      displayMedium: GoogleFonts.ebGaramond(color: darkText, fontWeight: FontWeight.bold),
-      displaySmall: GoogleFonts.ebGaramond(color: darkText, fontWeight: FontWeight.bold),
-      headlineLarge: GoogleFonts.ebGaramond(color: darkText, fontWeight: FontWeight.bold),
-      headlineMedium: GoogleFonts.ebGaramond(color: darkText, fontWeight: FontWeight.bold),
-      headlineSmall: GoogleFonts.ebGaramond(color: darkText, fontWeight: FontWeight.w600),
-      titleLarge: GoogleFonts.ebGaramond(color: darkText, fontWeight: FontWeight.w600),
-      titleMedium: GoogleFonts.ebGaramond(color: darkText, fontWeight: FontWeight.w600),
-    ),
-
-    appBarTheme: AppBarTheme(
-      backgroundColor: darkBackground,
-      foregroundColor: darkText,
-      elevation: 0,
-      centerTitle: true,
-      titleTextStyle: GoogleFonts.ebGaramond(
-        fontSize: 24,
-        fontWeight: FontWeight.w600,
-        color: darkText,
-        letterSpacing: 0,
-      ),
-      iconTheme: const IconThemeData(color: primaryColor),
-    ),
-
-    elevatedButtonTheme: ElevatedButtonThemeData(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.black,
-        textStyle: GoogleFonts.manrope(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.5,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+      cardTheme: CardThemeData(
+        color: c.surface,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
-    ),
-
-    outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: primaryColor,
-        side: const BorderSide(color: darkBorder, width: 1.5),
-        textStyle: GoogleFonts.manrope(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-      ),
-    ),
-
-    textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(
-        foregroundColor: primaryColor,
-        textStyle: GoogleFonts.manrope(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: c.cta,
+          foregroundColor: c.onCta,
+          textStyle: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w800),
+          shape: RoundedRectangleBorder(borderRadius: radius),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+          elevation: 0,
         ),
       ),
-    ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: c.cta,
+          foregroundColor: c.onCta,
+          textStyle: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w800),
+          shape: RoundedRectangleBorder(borderRadius: radius),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: c.text,
+          backgroundColor: c.surface,
+          side: BorderSide(color: c.border, width: 1),
+          textStyle: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w700),
+          shape: RoundedRectangleBorder(borderRadius: radius),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: c.give,
+          textStyle: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: c.surface,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        border: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.border)),
+        enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.border)),
+        focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.get, width: 2)),
+        hintStyle: GoogleFonts.manrope(color: c.textMuted),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: c.surface,
+        selectedColor: c.give,
+        side: BorderSide(color: c.border),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        labelStyle: GoogleFonts.manrope(fontWeight: FontWeight.w700, color: c.text),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: c.cta,
+        contentTextStyle: GoogleFonts.manrope(color: c.onCta, fontWeight: FontWeight.w600),
+        actionTextColor: b == Brightness.dark ? c.give : c.win,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: radius),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: c.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: c.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      ),
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: c.give,
+        linearTrackColor: c.surfaceLow,
+      ),
+      iconTheme: IconThemeData(color: c.text),
+      dividerTheme: DividerThemeData(color: c.border, thickness: 1),
+      tabBarTheme: TabBarThemeData(
+        labelColor: c.text,
+        unselectedLabelColor: c.textMuted,
+        labelStyle: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w800),
+        unselectedLabelStyle: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
+        indicatorColor: c.give,
+        indicatorSize: TabBarIndicatorSize.label,
+        dividerColor: Colors.transparent,
+        dividerHeight: 0,
+      ),
+    );
+  }
 
-    inputDecorationTheme: InputDecorationTheme(
-      filled: true,
-      fillColor: darkSurface,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: darkBorder, width: 1),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: darkBorder, width: 1),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: primaryColor, width: 2),
-      ),
-      hintStyle: GoogleFonts.manrope(
-        color: warmMutedText,
-      ),
-    ),
+  static final ThemeData lightTheme = _build(SwapnioColors.light, Brightness.light);
+  static final ThemeData darkTheme = _build(SwapnioColors.dark, Brightness.dark);
 
-    iconTheme: const IconThemeData(
-      color: primaryColor,
-    ),
-
-    tabBarTheme: TabBarThemeData(
-      labelColor: Color(0xFFD9864F),
-      unselectedLabelColor: warmMutedText,
-      labelStyle: GoogleFonts.manrope(
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-      ),
-      unselectedLabelStyle: GoogleFonts.manrope(
-        fontSize: 14,
-        fontWeight: FontWeight.w500,
-      ),
-      indicatorColor: Color(0xFFD9864F),
-      indicatorSize: TabBarIndicatorSize.label,
-      dividerColor: Colors.transparent,
-      dividerHeight: 0,
-    ),
-  );
-
-  // Custom soft shadow typically used in containers
   static final List<BoxShadow> softShadow = [
     BoxShadow(
-      color: const Color(0xFF3A302A).withValues(alpha: 0.04), // rgba(58, 48, 42, 0.04)
-      blurRadius: 16,
-      spreadRadius: 0,
-      offset: const Offset(0, 2),
+      color: const Color(0xFF17142B).withValues(alpha: 0.05),
+      blurRadius: 18,
+      offset: const Offset(0, 4),
     ),
   ];
 }

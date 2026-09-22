@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme.dart';
+import 'swapnio_badges.dart';
 
 /// Celebration overlay used at the app's two emotional peaks: a new match,
 /// and finishing a swap session.
@@ -90,11 +91,11 @@ class _ConfettiOverlayState extends State<ConfettiOverlay>
   late final List<_ConfettiPiece> _pieces;
 
   static const _palette = [
-    AppTheme.primaryColor,
-    AppTheme.tertiaryColor,
-    Color(0xFFE29A63),
-    Color(0xFF86A89B),
-    Color(0xFFF2C14E),
+    AppTheme.giveColor,
+    AppTheme.getColor,
+    AppTheme.winColor,
+    AppTheme.inkColor,
+    Color(0xFF2F9E6A),
   ];
 
   @override
@@ -155,6 +156,7 @@ class _ConfettiOverlayState extends State<ConfettiOverlay>
 Future<void> showCelebrationDialog(
   BuildContext context, {
   required IconData icon,
+  String? badgeId,
   required String headline,
   required String message,
   required String primaryLabel,
@@ -194,23 +196,23 @@ Future<void> showCelebrationDialog(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppTheme.primaryColor.withValues(alpha: 0.12),
+                if (badgeId != null)
+                  SwapBadge(spec: badgeSpecFor(badgeId), size: 96)
+                else
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: dialogContext.sw.give.withValues(alpha: 0.12),
+                    ),
+                    child: Icon(icon, size: 46, color: dialogContext.sw.give),
                   ),
-                  child: Icon(icon, size: 46, color: AppTheme.primaryColor),
-                ),
                 const SizedBox(height: 16),
                 Text(
                   headline,
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(dialogContext).colorScheme.onSurface,
-                  ),
+                  style: AppTheme.display(
+                      fontSize: 25, color: Theme.of(dialogContext).colorScheme.onSurface),
                 ),
                 const SizedBox(height: 10),
                 Text(
@@ -276,20 +278,20 @@ class AnimatedPointsBadge extends StatelessWidget {
       builder: (context, value, _) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: AppTheme.primaryColor.withValues(alpha: 0.1),
+          color: AppTheme.winColor.withValues(alpha: 0.22),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
+          border: Border.all(color: AppTheme.winColor),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.stars, size: 18, color: AppTheme.primaryColor),
+            const Icon(Icons.bolt_rounded, size: 18, color: AppTheme.inkColor),
             const SizedBox(width: 8),
             Text(
               '+${value.round()} $label',
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
-                color: AppTheme.primaryColor,
+                color: AppTheme.inkColor,
               ),
             ),
           ],

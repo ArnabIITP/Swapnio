@@ -28,7 +28,7 @@ Future<void> showSafetySheet(
               height: 4,
               margin: const EdgeInsets.only(bottom: 12),
               decoration: BoxDecoration(
-                color: AppTheme.warmBorder,
+                color: sheetContext.sw.border,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -36,8 +36,8 @@ Future<void> showSafetySheet(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Row(
                 children: [
-                  const Icon(Icons.shield_outlined,
-                      color: AppTheme.primaryColor, size: 22),
+                  Icon(Icons.shield_outlined,
+                      color: sheetContext.sw.give, size: 22),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -53,7 +53,7 @@ Future<void> showSafetySheet(
             ),
             const SizedBox(height: 8),
             ListTile(
-              leading: const Icon(Icons.block, color: AppTheme.tertiaryColor),
+              leading: Icon(Icons.block, color: sheetContext.sw.get),
               title: const Text('Block user'),
               subtitle: const Text(
                   'Hides them from your feed and removes pending requests'),
@@ -64,8 +64,8 @@ Future<void> showSafetySheet(
               },
             ),
             ListTile(
-              leading: const Icon(Icons.flag_outlined,
-                  color: AppTheme.tertiaryColor),
+              leading: Icon(Icons.flag_outlined,
+                  color: sheetContext.sw.get),
               title: const Text('Report user'),
               subtitle: const Text('Sends a report to the Swapnio moderators'),
               onTap: () async {
@@ -102,7 +102,7 @@ Future<void> _confirmAndBlock(
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.tertiaryColor,
+            backgroundColor: dialogContext.sw.get,
             foregroundColor: Colors.white,
           ),
           onPressed: () => Navigator.pop(dialogContext, true),
@@ -122,7 +122,7 @@ Future<void> _confirmAndBlock(
       content: Text(ok
           ? '$displayName has been blocked'
           : 'Could not block $displayName. Please try again.'),
-      backgroundColor: ok ? AppTheme.primaryColor : Colors.redAccent,
+      backgroundColor: ok ? context.sw.give : Colors.redAccent,
     ),
   );
 }
@@ -194,7 +194,7 @@ Future<void> showReportDialog(
       content: Text(ok
           ? 'Thanks - our moderators will review this report.'
           : 'Could not send the report. Please try again.'),
-      backgroundColor: ok ? AppTheme.primaryColor : Colors.redAccent,
+      backgroundColor: ok ? context.sw.give : Colors.redAccent,
     ),
   );
 }

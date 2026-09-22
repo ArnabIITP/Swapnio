@@ -30,8 +30,8 @@ class SkillSuggestionChips extends StatelessWidget {
             .map((s) => ActionChip(
                   label: Text(s, style: const TextStyle(fontSize: 12)),
                   onPressed: () => onSelected(s),
-                  backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.08),
-                  side: BorderSide(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
+                  backgroundColor: context.sw.give.withValues(alpha: 0.08),
+                  side: BorderSide(color: context.sw.give.withValues(alpha: 0.3)),
                   visualDensity: VisualDensity.compact,
                 ))
             .toList(),
