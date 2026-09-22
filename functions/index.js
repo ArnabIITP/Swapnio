@@ -14,6 +14,7 @@
  */
 const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
@@ -379,4 +380,104 @@ exports.sessionReminders = onSchedule('every 15 minutes', async () => {
         ),
     );
   }
+});
+
+/**
+ * Hard-deletes a user: the Auth login plus every document that references
+ * them. Without this, "delete" only removed `users/{uid}` - the account could
+ * sign in again with the same email, get the same uid back, and find all of
+ * its old chats and swaps intact.
+ *
+ * Callable (admin only). The caller must have `isAdmin: true` on their own
+ * user document; the same check the security rules use.
+ */
+exports.adminDeleteUser = onCall(async (request) => {
+  const callerUid = request.auth && request.auth.uid;
+  if (!callerUid) {
+    throw new HttpsError('unauthenticated', 'Sign in first.');
+  }
+
+  const db = admin.firestore();
+  const callerDoc = await db.collection('users').doc(callerUid).get();
+  if (!callerDoc.exists || callerDoc.data().isAdmin !== true) {
+    throw new HttpsError('permission-denied', 'Admins only.');
+  }
+
+  const uid = request.data && request.data.uid;
+  if (!uid || typeof uid !== 'string') {
+    throw new HttpsError('invalid-argument', 'A uid is required.');
+  }
+  if (uid === callerUid) {
+    throw new HttpsError('failed-precondition', 'You cannot delete your own admin account here.');
+  }
+
+  const deleted = {};
+  const deleteDocs = async (label, snapshot) => {
+    if (snapshot.empty) return;
+    let batch = db.batch();
+    let count = 0;
+    for (const doc of snapshot.docs) {
+      batch.delete(doc.ref);
+      count += 1;
+      if (count % 400 === 0) {
+        await batch.commit();
+        batch = db.batch();
+      }
+    }
+    await batch.commit();
+    deleted[label] = (deleted[label] || 0) + snapshot.size;
+  };
+
+  // Chat rooms: messages live in a subcollection, so they need recursive
+  // deletion rather than dropping the parent document.
+  const rooms = await db.collection('chatRooms').where('users', 'array-contains', uid).get();
+  for (const room of rooms.docs) {
+    await db.recursiveDelete(room.ref);
+  }
+  deleted.chatRooms = rooms.size;
+
+  await deleteDocs('swaps',
+      await db.collection('swaps').where('participants', 'array-contains', uid).get());
+  await deleteDocs('swipeRequestsSent',
+      await db.collection('swipeRequests').where('fromUserId', '==', uid).get());
+  await deleteDocs('swipeRequestsReceived',
+      await db.collection('swipeRequests').where('toUserId', '==', uid).get());
+  await deleteDocs('notifications',
+      await db.collection('notifications').where('userId', '==', uid).get());
+  await deleteDocs('profileViewsOf',
+      await db.collection('profileViews').where('viewedUserId', '==', uid).get());
+  await deleteDocs('profileViewsBy',
+      await db.collection('profileViews').where('viewerId', '==', uid).get());
+  await deleteDocs('ratingsReceived',
+      await db.collection('ratings').where('toUserId', '==', uid).get());
+  await deleteDocs('ratingsGiven',
+      await db.collection('ratings').where('fromUserId', '==', uid).get());
+
+  // Gamification and the user document itself (with its subcollections).
+  await db.recursiveDelete(db.collection('gamification').doc(uid));
+  await db.recursiveDelete(db.collection('users').doc(uid));
+  deleted.profile = 1;
+
+  // Finally the login. Without this the same email signs back in and is
+  // handed the same uid.
+  let authDeleted = false;
+  try {
+    await admin.auth().deleteUser(uid);
+    authDeleted = true;
+  } catch (error) {
+    if (error.code !== 'auth/user-not-found') throw error;
+  }
+
+  // Keep the public signup counter honest.
+  try {
+    await db.collection('stats').doc('public').set(
+        { userCount: admin.firestore.FieldValue.increment(-1) },
+        { merge: true },
+    );
+  } catch (_) {
+    // The counter is cosmetic; never fail a deletion over it.
+  }
+
+  console.log(`adminDeleteUser: ${callerUid} deleted ${uid}`, deleted, { authDeleted });
+  return { ok: true, authDeleted, deleted };
 });

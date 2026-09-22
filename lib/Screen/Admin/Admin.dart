@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'dart:async';
 import '../../theme.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../../ui/swapnio_kit.dart';
+import '../../ui/swapnio_widgets.dart';
 
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
@@ -14,7 +17,6 @@ class AdminPage extends StatefulWidget {
 
 class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMixin {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
   late TabController _tabController;
   bool _isLoading = true;
   Map<String, dynamic> _stats = {};
@@ -94,20 +96,45 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
     }
   }
 
+  /// Deleting a user has to happen server-side: the Auth login can only be
+  /// removed with the Admin SDK, and one user may not delete another's
+  /// documents under the security rules. Deleting only `users/{uid}` from
+  /// here left the account able to sign back in with the same uid - and with
+  /// every old chat and swap still attached to it.
+  String? _deletingUid;
+
   Future<void> _deleteUser(String uid) async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _deletingUid = uid);
     try {
-      await _firestore.collection('users').doc(uid).delete();
-      if (_auth.currentUser?.uid == uid) {
-        await _auth.currentUser!.delete();
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("User deleted successfully")),
+      final callable = FirebaseFunctions.instance.httpsCallable('adminDeleteUser');
+      final result = await callable.call<Map<String, dynamic>>({'uid': uid});
+      final authDeleted = result.data['authDeleted'] == true;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(authDeleted
+              ? 'User and all their data deleted.'
+              : 'Data deleted. No login existed for this account.'),
+        ),
       );
       _fetchAllUsers();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to delete user: $e")),
+      _fetchAdminStats();
+    } on FirebaseFunctionsException catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Could not delete user: ${e.message ?? e.code}'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Could not delete user: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _deletingUid = null);
     }
   }
 
@@ -115,8 +142,11 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Confirm Delete"),
-        content: Text("Are you sure you want to delete $name's account?"),
+        title: const Text('Delete this account?'),
+        content: Text(
+          "This permanently removes $name's login and every chat, swap, "
+          'request and rating attached to it. It cannot be undone.',
+        ),
         actions: [
           TextButton(
             child: const Text("Cancel"),
@@ -154,45 +184,65 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: AppTheme.backgroundLight,
+      backgroundColor: context.sw.bg,
       body: NestedScrollView(
         headerSliverBuilder: (context, innerBoxIsScrolled) => [
           SliverAppBar(
-            expandedHeight: 200,
+            expandedHeight: 150,
             pinned: true,
-            backgroundColor: AppTheme.primaryColor,
-            flexibleSpace: FlexibleSpaceBar(
-              title: const Text(
-                'Admin Dashboard',
-                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+            backgroundColor: context.sw.bg,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            leading: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Pressable(
+                onTap: () => Navigator.of(context).maybePop(),
+                child: Container(
+                  decoration:
+                      BoxDecoration(color: context.sw.surface, shape: BoxShape.circle),
+                  child: Icon(Icons.arrow_back_rounded,
+                      size: 20, color: context.sw.text, semanticLabel: 'Back'),
+                ),
               ),
-              background: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Color(0xFFE29A63),
-                      AppTheme.primaryColor,
-                      AppTheme.tertiaryColor,
+            ),
+            flexibleSpace: FlexibleSpaceBar(
+              background: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 52, 20, 10),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('ADMIN',
+                          style: AppTheme.label(fontSize: 10, color: context.sw.give)),
+                      const SizedBox(height: 4),
+                      Text('Dashboard',
+                          style: AppTheme.display(fontSize: 32, color: context.sw.text)),
                     ],
                   ),
                 ),
               ),
             ),
             actions: [
-              IconButton(
-                icon: const Icon(Icons.refresh, color: Colors.white),
-                onPressed: () {
-                  _fetchAllUsers();
-                  _fetchAdminStats();
-                },
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Pressable(
+                  onTap: () {
+                    _fetchAllUsers();
+                    _fetchAdminStats();
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration:
+                        BoxDecoration(color: context.sw.surface, shape: BoxShape.circle),
+                    child: Icon(Icons.refresh_rounded,
+                        size: 20, color: context.sw.text, semanticLabel: 'Refresh'),
+                  ),
+                ),
               ),
             ],
-            systemOverlayStyle: const SystemUiOverlayStyle(
-              statusBarColor: Colors.transparent,
-              statusBarIconBrightness: Brightness.light,
-            ),
           ),
           // Stats + search scroll away with the banner instead of
           // permanently sitting above every tab's content regardless of
@@ -219,7 +269,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                     borderRadius: BorderRadius.circular(15),
                   ),
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: context.sw.surface,
                   contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
                 ),
                 onChanged: (value) {
@@ -232,28 +282,31 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
         body: Column(
           children: [
             Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(25),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 5),
-                  ),
-                ],
+                color: context.sw.surfaceLow,
+                borderRadius: BorderRadius.circular(16),
               ),
               child: TabBar(
                 controller: _tabController,
-                labelColor: colorScheme.primary,
-                unselectedLabelColor: Colors.grey,
-                indicatorSize: TabBarIndicatorSize.label,
-                indicatorColor: colorScheme.primary,
+                indicator: BoxDecoration(
+                  color: context.sw.cta,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                indicatorSize: TabBarIndicatorSize.tab,
+                dividerHeight: 0,
+                labelColor: context.sw.onCta,
+                unselectedLabelColor: context.sw.textMuted,
+                labelStyle:
+                    GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 13.5),
+                unselectedLabelStyle:
+                    GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13.5),
+                splashBorderRadius: BorderRadius.circular(12),
                 tabs: const [
-                  Tab(text: 'Users'),
-                  Tab(text: 'Skills'),
-                  Tab(text: 'Reports'),
+                  Tab(height: 40, text: 'Users'),
+                  Tab(height: 40, text: 'Skills'),
+                  Tab(height: 40, text: 'Reports'),
                 ],
               ),
             ),
@@ -278,7 +331,6 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
           _showAddSkillDialog();
         },
         child: const Icon(Icons.add),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         elevation: 6,
       ),
     );
@@ -290,12 +342,12 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Dashboard Overview',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
-              color: AppTheme.primaryColor,
+              color: context.sw.give,
             ),
           ),
           const SizedBox(height: 16),
@@ -312,7 +364,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 icon: Icons.swap_horiz,
                 value: _stats['swapsCount']?.toString() ?? '0',
                 label: 'Total Swaps',
-                color: AppTheme.tertiaryColor,
+                color: context.sw.get,
               ),
             ],
           ),
@@ -323,7 +375,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 icon: Icons.lightbulb,
                 value: _stats['uniqueSkillsCount']?.toString() ?? '0',
                 label: 'Unique Skills',
-                color: AppTheme.tertiaryColor,
+                color: context.sw.get,
               ),
               const SizedBox(width: 12),
               _buildStatCard(
@@ -349,7 +401,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 18),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.sw.surface,
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
@@ -376,7 +428,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
             Text(
               label,
               style: TextStyle(
-                color: Colors.grey.shade600,
+                color: context.sw.textMuted,
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
               ),
@@ -414,12 +466,8 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
         // was breaking the entire list's rendering.
         final rating = (data['rating'] as num?)?.toDouble() ?? 0.0;
         final isAdmin = (data['isAdmin'] ?? false) as bool;
-        return Card(
+        return SurfaceCard(
           margin: const EdgeInsets.only(bottom: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          elevation: 4,
           child: Padding(
             padding: const EdgeInsets.all(18),
             child: Row(
@@ -427,12 +475,12 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
               children: [
                 CircleAvatar(
                   radius: 32,
-                  backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.13),
+                  backgroundColor: context.sw.give.withValues(alpha: 0.13),
                   backgroundImage: photoUrl != null && photoUrl.isNotEmpty
                       ? NetworkImage(photoUrl)
                       : null,
                   child: photoUrl == null || photoUrl.isEmpty
-                      ? const Icon(Icons.person, size: 32, color: AppTheme.primaryColor)
+                      ? Icon(Icons.person, size: 32, color: context.sw.give)
                       : null,
                 ),
                 const SizedBox(width: 18),
@@ -473,7 +521,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                       const SizedBox(height: 4),
                       Text(
                         email,
-                        style: TextStyle(color: Colors.grey.shade600),
+                        style: TextStyle(color: context.sw.textMuted),
                       ),
                       const SizedBox(height: 8),
                       if (skills != 'None')
@@ -487,7 +535,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.star, color: AppTheme.primaryColor, size: 17),
+                              Icon(Icons.star, color: context.sw.give, size: 17),
                               const SizedBox(width: 4),
                               Text('${rating.toStringAsFixed(1)} Rating'),
                             ],
@@ -496,14 +544,18 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                             children: [
                               _buildUserActionButton(
                                 icon: Icons.block,
-                                color: AppTheme.tertiaryColor,
+                                color: context.sw.get,
                                 onTap: () => _confirmBanUser(uid, null),
                               ),
                               const SizedBox(width: 8),
                               _buildUserActionButton(
-                                icon: Icons.delete,
+                                icon: _deletingUid == uid
+                                    ? Icons.hourglass_top_rounded
+                                    : Icons.delete,
                                 color: Colors.red,
-                                onTap: () => _confirmDelete(uid, name),
+                                onTap: _deletingUid == null
+                                    ? () => _confirmDelete(uid, name)
+                                    : () {},
                               ),
                             ],
                           ),
@@ -555,14 +607,14 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
         ..._buildCuratedSkillsSection(),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-          child: const Row(
+          child: Row(
             children: [
               Text(
                 'Most Popular Skills',
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.bold,
-                  color: AppTheme.primaryColor,
+                  color: context.sw.give,
                 ),
               ),
             ],
@@ -586,11 +638,8 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
               final percentage = _allUsers.isEmpty ? 0.0 : (count / _allUsers.length) * 100;
               final hue = (skill.hashCode % 360).toDouble();
               final color = HSLColor.fromAHSL(1.0, hue, 0.6, 0.5).toColor();
-              return Card(
+              return SurfaceCard(
                 margin: const EdgeInsets.only(bottom: 13),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(13),
-                ),
                 child: Padding(
                   padding: const EdgeInsets.all(15),
                   child: Column(
@@ -621,7 +670,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                                 Text(
                                   '$count ${count == 1 ? "user" : "users"} (${percentage.toStringAsFixed(1)}%)',
                                   style: TextStyle(
-                                    color: Colors.grey.shade600,
+                                    color: context.sw.textMuted,
                                     fontSize: 14,
                                   ),
                                 ),
@@ -629,7 +678,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                             ),
                           ),
                           IconButton(
-                            icon: const Icon(Icons.edit, color: AppTheme.primaryColor),
+                            icon: Icon(Icons.edit, color: context.sw.give),
                             onPressed: () {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(content: Text("Edit skill feature coming soon")),
@@ -645,7 +694,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                           value: _allUsers.isEmpty
                               ? 0
                               : (count / _allUsers.length).clamp(0.0, 1.0),
-                          backgroundColor: Colors.grey.shade200,
+                          backgroundColor: context.sw.border,
                           color: color,
                           minHeight: 8,
                         ),
@@ -668,20 +717,20 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.verified_user_outlined,
-                size: 80, color: Colors.grey.shade400),
+                size: 80, color: context.sw.border),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'All clear',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
-                color: AppTheme.primaryColor,
+                color: context.sw.give,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               'No open reports right now.',
-              style: TextStyle(color: Colors.grey.shade600),
+              style: TextStyle(color: context.sw.textMuted),
             ),
           ],
         ),
@@ -696,10 +745,10 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
             children: [
               Text(
                 '${_reports.length} open report${_reports.length == 1 ? '' : 's'}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.bold,
-                  color: AppTheme.primaryColor,
+                  color: context.sw.give,
                 ),
               ),
               const Spacer(),
@@ -708,7 +757,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 icon: const Icon(Icons.refresh, size: 18),
                 label: const Text('Refresh'),
                 style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryColor,
+                  foregroundColor: context.sw.give,
                 ),
               ),
             ],
@@ -731,9 +780,8 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
     final reportedId = (report['reportedUserId'] ?? '') as String;
     final reporterId = (report['reporterId'] ?? '') as String;
 
-    return Card(
+    return SurfaceCard(
       margin: const EdgeInsets.only(bottom: 13),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
       child: Padding(
         padding: const EdgeInsets.all(15),
         child: Column(
@@ -744,11 +792,11 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppTheme.tertiaryColor.withValues(alpha: 0.12),
+                    color: context.sw.get.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.flag_outlined,
-                      color: AppTheme.tertiaryColor),
+                  child: Icon(Icons.flag_outlined,
+                      color: context.sw.get),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -765,12 +813,12 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                       Text(
                         'Reported: $reportedId',
                         style: TextStyle(
-                            color: Colors.grey.shade600, fontSize: 12),
+                            color: context.sw.textMuted, fontSize: 12),
                       ),
                       Text(
                         'Reporter: $reporterId',
                         style: TextStyle(
-                            color: Colors.grey.shade600, fontSize: 12),
+                            color: context.sw.textMuted, fontSize: 12),
                       ),
                     ],
                   ),
@@ -788,11 +836,8 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                   onPressed: () =>
                       _updateReport(report['id'] as String?, 'dismissed'),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.grey.shade700,
-                    side: BorderSide(color: Colors.grey.shade400),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+                    foregroundColor: context.sw.textMuted,
+                    side: BorderSide(color: context.sw.border),
                   ),
                   child: const Text('Dismiss'),
                 ),
@@ -803,11 +848,8 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                   icon: const Icon(Icons.block, size: 16),
                   label: const Text('Suspend'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.tertiaryColor,
+                    backgroundColor: context.sw.get,
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
                   ),
                 ),
               ],
@@ -897,7 +939,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.tertiaryColor,
+              backgroundColor: dialogContext.sw.get,
               foregroundColor: Colors.white,
             ),
             onPressed: () async {
@@ -1071,17 +1113,16 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                   content: Text(ok
                       ? "Skill '$skillName' ${isEditing ? 'updated' : 'added'} successfully"
                       : "Failed to ${isEditing ? 'update' : 'add'} skill '$skillName'"),
-                  backgroundColor: ok ? AppTheme.primaryColor : Colors.redAccent,
+                  backgroundColor: ok ? context.sw.give : Colors.redAccent,
                 ),
               );
               if (ok) _loadSkills();
             },
             child: Text(isEditing ? 'Save Changes' : 'Add Skill'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primaryColor,
+              backgroundColor: dialogContext.sw.give,
               foregroundColor: Colors.white,
               textStyle: const TextStyle(fontWeight: FontWeight.bold),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           ),
         ],
@@ -1096,12 +1137,12 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
         child: Row(
           children: [
-            const Text(
+            Text(
               'Curated Skills',
               style: TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.bold,
-                color: AppTheme.primaryColor,
+                color: context.sw.give,
               ),
             ),
             const Spacer(),
@@ -1110,7 +1151,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
               label: const Text("Add Skill"),
               onPressed: () => _showAddSkillDialog(),
               style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryColor,
+                foregroundColor: context.sw.give,
                 textStyle: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
@@ -1136,9 +1177,9 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                   return InputChip(
                     label: Text(aliases.isEmpty ? name : '$name (+${aliases.length})'),
                     tooltip: aliases.isEmpty ? null : 'Aliases: ${aliases.join(', ')}',
-                    backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.08),
-                    side: BorderSide(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
-                    deleteIcon: const Icon(Icons.clear, size: 18, color: AppTheme.tertiaryColor),
+                    backgroundColor: context.sw.give.withValues(alpha: 0.08),
+                    side: BorderSide(color: context.sw.give.withValues(alpha: 0.3)),
+                    deleteIcon: Icon(Icons.clear, size: 18, color: context.sw.get),
                     onDeleted: () => _confirmDeleteSkill((skill['id'] as String?) ?? '', name),
                     onPressed: () => _showSkillDialog(existing: skill),
                   );
