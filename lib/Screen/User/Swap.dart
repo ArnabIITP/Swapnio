@@ -3,12 +3,14 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/safety_service.dart';
 import '../../services/match_service.dart';
 import '../../theme.dart';
+import '../../ui/swapnio_badges.dart';
+import '../../ui/swapnio_kit.dart';
+import '../../ui/swapnio_widgets.dart';
 import '../../ui/celebration.dart';
 import 'setup.dart';
 import 'user_detail.dart';
@@ -361,9 +363,9 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
       final dragPercentageY = _dragY / MediaQuery.of(context).size.height;
       final baseColor = Theme.of(context).scaffoldBackgroundColor;
       final redColor = Color.lerp(
-          baseColor, AppTheme.tertiaryColor.withValues(alpha: 0.2), -dragPercentageX.clamp(-1.0, 0.0))!;
+          baseColor, context.sw.get.withValues(alpha: 0.2), -dragPercentageX.clamp(-1.0, 0.0))!;
       final greenColor = Color.lerp(
-          baseColor, AppTheme.primaryColor.withValues(alpha: 0.2), dragPercentageX.clamp(0.0, 1.0))!;
+          baseColor, context.sw.give.withValues(alpha: 0.2), dragPercentageX.clamp(0.0, 1.0))!;
       final blueColor = Color.lerp(
           baseColor, Colors.blue.withValues(alpha: 0.1), -dragPercentageY.clamp(-1.0, 0.0))!;
 
@@ -570,7 +572,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryColor,
+                  color: context.sw.give,
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Row(
@@ -598,43 +600,68 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.sw;
     return Scaffold(
-      backgroundColor: _dragTintColor ?? Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        title: Text(
-          "Skill Match",
-          style: GoogleFonts.ebGaramond(
-            fontWeight: FontWeight.w800,
-            color: Theme.of(context).colorScheme.onSurface,
-            fontSize: 24,
-            letterSpacing: 0,
-          ),
+      backgroundColor: _dragTintColor ?? c.bg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text('Discover',
+                        style: AppTheme.display(fontSize: 34, color: c.text)),
+                  ),
+                  _buildLikesYouBadge(),
+                  const SizedBox(width: 8),
+                  _headerButton(
+                    icon: _listMode ? Icons.style_rounded : Icons.view_list_rounded,
+                    tooltip: _listMode ? 'Swipe view' : 'List view',
+                    onTap: () => setState(() => _listMode = !_listMode),
+                  ),
+                  const SizedBox(width: 8),
+                  _headerButton(
+                    icon: Icons.refresh_rounded,
+                    tooltip: 'Refresh matches',
+                    onTap: _isLoading ? null : _loadUsers,
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Stack(
+                children: [
+                  _listMode ? _buildListMode() : _buildDeckMode(),
+                  if (_showCoachmarks && !_listMode) _buildCoachmarks(),
+                ],
+              ),
+            ),
+          ],
         ),
-        actions: [
-          _buildLikesYouBadge(),
-          IconButton(
-            icon: Icon(_listMode ? Icons.style : Icons.view_list,
-                color: AppTheme.primaryColor),
-            tooltip: _listMode ? 'Swipe view' : 'List view',
-            onPressed: () {
-              HapticFeedback.selectionClick();
-              setState(() => _listMode = !_listMode);
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh, color: AppTheme.primaryColor),
-            onPressed: _isLoading ? null : _loadUsers,
-            tooltip: 'Refresh matches',
-          ),
-        ],
       ),
-      body: Stack(
-        children: [
-          _listMode ? _buildListMode() : _buildDeckMode(),
-          if (_showCoachmarks && !_listMode) _buildCoachmarks(),
-        ],
+    );
+  }
+
+  Widget _headerButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onTap,
+  }) {
+    final c = context.sw;
+    return Tooltip(
+      message: tooltip,
+      child: Pressable(
+        onTap: onTap,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(color: c.surface, shape: BoxShape.circle),
+          child: Icon(icon,
+              size: 20, color: onTap == null ? c.textMuted : c.text, semanticLabel: tooltip),
+        ),
       ),
     );
   }
@@ -694,7 +721,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
             controller: _searchController,
             decoration: InputDecoration(
               hintText: 'Search people or skills...',
-              prefixIcon: const Icon(Icons.search, color: AppTheme.primaryColor),
+              prefixIcon: Icon(Icons.search, color: context.sw.give),
               suffixIcon: _searchQuery.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear),
@@ -708,7 +735,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
               fillColor: Theme.of(context).colorScheme.surface,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: AppTheme.warmBorder),
+                borderSide: BorderSide(color: context.sw.border),
               ),
             ),
             onChanged: (value) => setState(() => _searchQuery = value),
@@ -756,13 +783,13 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           tag: 'avatar_${user['id']}',
           child: CircleAvatar(
             radius: 24,
-            backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.12),
+            backgroundColor: context.sw.give.withValues(alpha: 0.12),
             backgroundImage: (user['photoUrl'] as String?)?.isNotEmpty == true
                 ? NetworkImage(user['photoUrl'])
                 : null,
             child: (user['photoUrl'] as String?)?.isNotEmpty == true
                 ? null
-                : const Icon(Icons.person, color: AppTheme.primaryColor),
+                : Icon(Icons.person, color: context.sw.give),
           ),
         ),
         title: Text(user['name'] ?? 'Anonymous',
@@ -776,15 +803,15 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
             ? Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryColor.withValues(alpha: 0.12),
+                  color: context.sw.give.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
                   '${percent.round()}%',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
-                      color: AppTheme.primaryColor),
+                      color: context.sw.give),
                 ),
               )
             : null,
@@ -847,7 +874,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           Container(
             padding: const EdgeInsets.all(9),
             decoration: BoxDecoration(
-              color: AppTheme.primaryColor.withValues(alpha: 0.25),
+              color: context.sw.give.withValues(alpha: 0.25),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: Colors.white, size: 19),
@@ -863,22 +890,9 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
   }
 
   Widget _buildLoadingState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 20),
-          Text(
-            'Finding potential matches...',
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.grey[600],
-            ),
-          ),
-        ],
-      ),
-    );
+    // A card-shaped placeholder instead of a spinner: the wait reads as
+    // "almost there" rather than "nothing is happening".
+    return _listMode ? const ListSkeleton() : const DiscoverCardSkeleton();
   }
 
   Widget _buildEmptyState() {
@@ -888,25 +902,21 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off, size: 80, color: AppTheme.warmBorder),
-            const SizedBox(height: 24),
+            const SwapMotif(width: 180),
+            const SizedBox(height: 26),
             Text(
-              "No more matches found",
-              style: GoogleFonts.ebGaramond(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.primaryColor,
-              ),
+              'No more matches found',
+              style: AppTheme.display(fontSize: 23, color: context.sw.text),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Text(
               _searchQuery.isNotEmpty
                   ? 'Nothing matched "$_searchQuery". Try a different skill or clear the search.'
                   : "You've seen everyone for now. Adding more skills you want to "
                       'learn widens your matches straight away.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey[600]),
+              style: TextStyle(color: context.sw.textMuted),
             ),
             const SizedBox(height: 32),
             // Every empty state should name the next action, not dead-end.
@@ -942,40 +952,44 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
     required double dislikeProgress,
     required double favoriteProgress,
   }) {
+    final c = context.sw;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 16.0),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _buildCircleButton(
-            actionColor: const Color(0xFFD8D0C8),
-            icon: Icons.undo,
+            actionColor: c.textMuted,
+            icon: Icons.undo_rounded,
             label: 'Undo last swipe',
             onPressed: _onRewind,
+            size: 48,
           ),
           _buildCircleButton(
-            actionColor: AppTheme.tertiaryColor,
-            icon: Icons.close,
+            actionColor: c.text,
+            icon: Icons.close_rounded,
             label: 'Pass',
             onPressed: _onDislike,
-            scale: 1.0 + (0.25 * dislikeProgress),
+            scale: 1.0 + (0.22 * dislikeProgress),
             activationProgress: dislikeProgress,
           ),
           _buildCircleButton(
-            actionColor: const Color(0xFF86A89B),
-            icon: Icons.star,
+            actionColor: c.get,
+            icon: Icons.star_rounded,
             label: 'Save as favourite',
             onPressed: _onFavorite,
-            scale: 1.0 + (0.25 * favoriteProgress),
+            scale: 1.0 + (0.22 * favoriteProgress),
             activationProgress: favoriteProgress,
           ),
           _buildCircleButton(
-            actionColor: AppTheme.primaryColor,
-            icon: Icons.favorite,
+            actionColor: c.give,
+            icon: Icons.favorite_rounded,
             label: 'Send swap request',
             onPressed: _onLike,
-            scale: 1.0 + (0.25 * likeProgress),
+            scale: 1.0 + (0.22 * likeProgress),
             activationProgress: likeProgress,
+            size: 70,
+            filled: true,
           ),
         ],
       ),
@@ -989,48 +1003,38 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
     required VoidCallback onPressed,
     double scale = 1.0,
     double activationProgress = 0.0,
+    double size = 58,
+    bool filled = false,
   }) {
-    final Color backgroundColor =
-    Color.lerp(Colors.white, actionColor, activationProgress)!;
-    final Color iconColor =
-    Color.lerp(actionColor, Colors.white, activationProgress)!;
+    final c = context.sw;
+    final base = filled ? actionColor : c.surface;
+    final backgroundColor = Color.lerp(base, actionColor, activationProgress)!;
+    final iconColor = filled
+        ? Colors.white
+        : Color.lerp(actionColor, Colors.white, activationProgress)!;
 
     return AnimatedScale(
       scale: scale,
       duration: const Duration(milliseconds: 150),
-      child: Container(
-        width: 64,
-        height: 64,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withValues(alpha: 0.2),
-              spreadRadius: 2,
-              blurRadius: 5,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Material(
-          color: backgroundColor,
-          shape: const CircleBorder(),
-          // Icon-only buttons are invisible to screen readers without a
-          // label; the tooltip also helps sighted users on long-press.
-          child: Tooltip(
-            message: label,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(32),
-              onTap: onPressed,
-              child: Center(
-                child: Icon(
-                  icon,
-                  color: iconColor,
-                  size: 36,
-                  semanticLabel: label,
+      child: Tooltip(
+        message: label,
+        child: Pressable(
+          onTap: onPressed,
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: (filled ? actionColor : Colors.black).withValues(alpha: 0.18),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
                 ),
-              ),
+              ],
             ),
+            child: Icon(icon, color: iconColor, size: size * 0.42, semanticLabel: label),
           ),
         ),
       ),
@@ -1099,13 +1103,13 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-                border: Border.all(color: AppTheme.primaryColor, width: 3),
+                border: Border.all(color: context.sw.give, width: 3),
                 borderRadius: BorderRadius.circular(10),
                 color: Colors.white.withValues(alpha: 0.9)),
             child: Text(
               "LIKE",
               style: GoogleFonts.manrope(
-                color: AppTheme.primaryColor,
+                color: context.sw.give,
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
               ),
@@ -1129,13 +1133,13 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-                border: Border.all(color: AppTheme.tertiaryColor, width: 3),
+                border: Border.all(color: context.sw.get, width: 3),
                 borderRadius: BorderRadius.circular(10),
                 color: Colors.white.withValues(alpha: 0.9)),
             child: Text(
               "NOPE",
               style: GoogleFonts.manrope(
-                color: AppTheme.tertiaryColor,
+                color: context.sw.get,
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
               ),
@@ -1177,6 +1181,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
   }
 
   Widget _buildCardContent(Map<String, dynamic> user) {
+    final c = context.sw;
     final skillsOffered = List<String>.from(user['skillsOffered'] ?? []);
     final skillsWanted = List<String>.from(user['skillsWanted'] ?? []);
     final availability = List<String>.from(user['availability'] ?? []);
@@ -1185,118 +1190,175 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
     // crashed the admin user list in production.
     final rating = (user['rating'] as num?)?.toDouble() ?? 0.0;
     final completedSwaps = (user['completedSwaps'] as num?)?.toInt() ?? 0;
+    final matchPercent = (user['matchPercent'] as num?)?.toDouble() ?? 0;
+    final name = (user['name'] ?? 'Anonymous').toString();
+    final photo = (user['photoUrl'] ?? '').toString();
+    final bio = (user['bio'] ?? '').toString().trim();
+    // What each side would get out of it, in the viewer's own terms.
+    final theyTeach = List<String>.from(user['theyTeachIWant'] ?? []);
+    final iTeach = List<String>.from(user['iTeachTheyWant'] ?? []);
+    final youGet = theyTeach.isNotEmpty ? theyTeach.first : (skillsOffered.isNotEmpty ? skillsOffered.first : '');
+    final youGive = iTeach.isNotEmpty ? iTeach.first : (skillsWanted.isNotEmpty ? skillsWanted.first : '');
 
     return SizedBox(
-      width: MediaQuery.of(context).size.width * 0.87,
-      height: MediaQuery.of(context).size.height * 0.62,
+      width: MediaQuery.of(context).size.width * 0.88,
+      height: MediaQuery.of(context).size.height * 0.60,
       child: Container(
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: AppTheme.warmBorder, width: 1),
-          boxShadow: AppTheme.softShadow,
+          color: c.surface,
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.10),
+              blurRadius: 28,
+              offset: const Offset(0, 12),
+            ),
+          ],
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(28),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(30),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CachedNetworkImage(
-                imageUrl: user["photoUrl"] ?? '',
-                imageBuilder: (context, imageProvider) => CircleAvatar(
-                  radius: 64,
-                  backgroundImage: imageProvider,
-                ),
-                placeholder: (context, url) => Shimmer.fromColors(
-                  baseColor: Colors.grey[300]!,
-                  highlightColor: Colors.grey[100]!,
-                  child: CircleAvatar(
-                    radius: 64,
-                    backgroundColor: Colors.grey[300],
-                  ),
-                ),
-                errorWidget: (context, url, error) => CircleAvatar(
-                  radius: 64,
-                  backgroundColor: Colors.grey[300],
-                  child:
-                  const Icon(Icons.person, size: 64, color: Colors.grey),
+              SizedBox(
+                height: 232,
+                width: double.infinity,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (photo.isEmpty)
+                      Container(
+                        color: c.surfaceLow,
+                        child: Icon(Icons.person_rounded, size: 76, color: c.textMuted),
+                      )
+                    else
+                      CachedNetworkImage(
+                        imageUrl: photo,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => Shimmer.fromColors(
+                          baseColor: c.surfaceLow,
+                          highlightColor: c.surface,
+                          child: Container(color: c.surfaceLow),
+                        ),
+                        errorWidget: (context, url, error) => Container(
+                          color: c.surfaceLow,
+                          child: Icon(Icons.person_rounded, size: 76, color: c.textMuted),
+                        ),
+                      ),
+                    if (matchPercent > 0)
+                      Positioned(
+                        top: 14,
+                        left: 14,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: c.win,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.bolt_rounded, size: 14, color: c.onWin),
+                              const SizedBox(width: 4),
+                              CountUpText(
+                                value: matchPercent.round(),
+                                suffix: '% match',
+                                duration: const Duration(milliseconds: 700),
+                                style: GoogleFonts.manrope(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: c.onWin),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 18),
-              Text(
-                user["name"] ?? 'Anonymous',
-                style: GoogleFonts.ebGaramond(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  RatingBar.builder(
-                    initialRating: rating,
-                    minRating: 0,
-                    direction: Axis.horizontal,
-                    allowHalfRating: true,
-                    itemCount: 5,
-                    itemSize: 18,
-                    ignoreGestures: true,
-                    itemBuilder: (context, _) => const Icon(
-                      Icons.star,
-                      color: AppTheme.primaryColor,
-                    ),
-                    onRatingUpdate: (_) {},
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '($completedSwaps)',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-              if (((user['matchPercent'] as double?) ?? 0) > 0)
-                _buildMatchBreakdown(user),
-              const SizedBox(height: 22),
-              Divider(height: 1, color: Colors.grey[200]),
-              const SizedBox(height: 18),
               Expanded(
-                child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildSkillSection('Skills Offered', skillsOffered,
-                          Icons.auto_fix_high, AppTheme.primaryColor),
-                      const SizedBox(height: 18),
-                      _buildSkillSection('Skills Wanted', skillsWanted,
-                          Icons.search, AppTheme.tertiaryColor),
-                      const SizedBox(height: 18),
-                      _buildAvailabilitySection(availability),
-                      if (user['bio'] != null &&
-                          user['bio'].toString().isNotEmpty) ...[
-                        const SizedBox(height: 18),
-                        Text(
-                          'About',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 17,
-                            color: Theme.of(context).colorScheme.onSurface,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTheme.display(fontSize: 25, color: c.text)),
+                          ),
+                          if (completedSwaps > 0) ...[
+                            Icon(Icons.verified_rounded, size: 15, color: c.success),
+                            const SizedBox(width: 4),
+                            Text(
+                              '$completedSwaps swap${completedSwaps == 1 ? '' : 's'}'
+                              '${rating > 0 ? ' · ${rating.toStringAsFixed(1)}★' : ''}',
+                              style: GoogleFonts.manrope(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: c.success),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (youGet.isNotEmpty)
+                            TintTag('You get: $youGet', color: c.get),
+                          if (youGive.isNotEmpty)
+                            TintTag('You give: $youGive', color: c.give),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (bio.isNotEmpty)
+                                Text(bio,
+                                    style: GoogleFonts.manrope(
+                                        fontSize: 13, color: c.textMuted, height: 1.45)),
+                              if (matchPercent > 0) _buildMatchBreakdown(user),
+                              if (skillsOffered.length > 1 || skillsWanted.length > 1) ...[
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: [
+                                    for (final skill in skillsOffered.take(4))
+                                      _plainChip(skill, c.get),
+                                    for (final skill in skillsWanted.take(3))
+                                      _plainChip(skill, c.give),
+                                  ],
+                                ),
+                              ],
+                              if (availability.isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Icon(Icons.schedule_rounded, size: 14, color: c.textMuted),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text('Free ${availability.join(', ')}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: GoogleFonts.manrope(
+                                              fontSize: 12, color: c.textMuted)),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          user['bio'].toString(),
-                          style: TextStyle(
-                            color: Colors.grey[800],
-                            fontSize: 14,
-                            height: 1.4,
-                          ),
-                        ),
-                      ],
+                      ),
                     ],
                   ),
                 ),
@@ -1305,6 +1367,21 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _plainChip(String label, Color color) {
+    final c = context.sw;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: c.surfaceLow,
+        borderRadius: BorderRadius.circular(11),
+        border: Border(left: BorderSide(color: color, width: 3)),
+      ),
+      child: Text(label,
+          style: GoogleFonts.manrope(
+              fontSize: 11.5, fontWeight: FontWeight.w700, color: c.text)),
     );
   }
 
@@ -1336,152 +1413,31 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.bolt, size: 16, color: AppTheme.primaryColor),
-              const SizedBox(width: 6),
-              Text(
-                '${(user['matchPercent'] as double).round()}% match',
-                style: GoogleFonts.manrope(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.primaryColor,
-                ),
-              ),
-            ],
-          ),
-          if (reasons.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Wrap(spacing: 6, runSpacing: 6, children: reasons),
-          ],
+          if (reasons.isNotEmpty) Wrap(spacing: 6, runSpacing: 6, children: reasons),
         ],
       ),
     );
   }
 
   Widget _matchReasonChip(IconData icon, String label) {
+    final c = context.sw;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: AppTheme.primaryColor.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
+        color: c.get.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: AppTheme.primaryColor),
+          Icon(icon, size: 12, color: c.get),
           const SizedBox(width: 4),
-          Text(
-            label,
-            style: GoogleFonts.manrope(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.primaryColor,
-            ),
-          ),
+          Text(label,
+              style: GoogleFonts.manrope(
+                  fontSize: 11, fontWeight: FontWeight.w700, color: c.get)),
         ],
       ),
     );
   }
 
-  Widget _buildSkillSection(
-      String title, List<String> skills, IconData icon, Color color) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 16, color: color),
-            const SizedBox(width: 8),
-            Text(
-              title,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: color,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        skills.isEmpty
-            ? Text(
-          'None specified',
-          style: TextStyle(
-              fontStyle: FontStyle.italic, color: Colors.grey[500]),
-        )
-            : Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: skills
-              .map((skill) => Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: color.withValues(alpha: 0.3)),
-            ),
-            child: Text(
-              skill,
-              style: TextStyle(color: color, fontSize: 12),
-            ),
-          ))
-              .toList(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAvailabilitySection(List<String> availability) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: const [
-            Icon(Icons.access_time, size: 16, color: AppTheme.tertiaryColor),
-            SizedBox(width: 8),
-            Text(
-              'Availability',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: AppTheme.tertiaryColor,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        availability.isEmpty
-            ? Text(
-          'None specified',
-          style: TextStyle(
-              fontStyle: FontStyle.italic, color: Colors.grey[500]),
-        )
-            : Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: availability
-              .map((day) => Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: AppTheme.tertiaryColor.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                  color: AppTheme.tertiaryColor.withValues(alpha: 0.3)),
-            ),
-            child: Text(
-              day,
-              style: const TextStyle(
-                  color: AppTheme.tertiaryColor, fontSize: 12),
-            ),
-          ))
-              .toList(),
-        ),
-      ],
-    );
-  }
 }

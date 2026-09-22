@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import '../../theme.dart';
+import '../../ui/swapnio_kit.dart';
+import '../../ui/swapnio_widgets.dart';
 import '../../ui/safety_sheet.dart';
 
 class UserDetailPage extends StatefulWidget {
@@ -217,7 +219,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
   @override
   Widget build(BuildContext context) {
   return Scaffold(
-    backgroundColor: AppTheme.backgroundLight,
+    backgroundColor: context.sw.bg,
     body: _isLoading
       ? const Center(child: CircularProgressIndicator())
       : _userData == null
@@ -245,11 +247,11 @@ class _UserDetailPageState extends State<UserDetailPage> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: (isReliable ? AppTheme.primaryColor : Colors.redAccent)
+            color: (isReliable ? context.sw.give : Colors.redAccent)
                 .withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: (isReliable ? AppTheme.primaryColor : Colors.redAccent)
+              color: (isReliable ? context.sw.give : Colors.redAccent)
                   .withValues(alpha: 0.35),
             ),
           ),
@@ -259,7 +261,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
               Icon(
                 isReliable ? Icons.verified_user : Icons.warning_amber_rounded,
                 size: 15,
-                color: isReliable ? AppTheme.primaryColor : Colors.redAccent,
+                color: isReliable ? context.sw.give : Colors.redAccent,
               ),
               const SizedBox(width: 6),
               Text(
@@ -267,7 +269,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: isReliable ? AppTheme.primaryColor : Colors.redAccent,
+                  color: isReliable ? context.sw.give : Colors.redAccent,
                 ),
               ),
             ],
@@ -285,14 +287,14 @@ class _UserDetailPageState extends State<UserDetailPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.lock_outline, size: 64, color: AppTheme.warmBorder),
+            Icon(Icons.lock_outline, size: 64, color: context.sw.border),
             const SizedBox(height: 16),
             Text(
               'This profile is private',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: AppTheme.darkTextColor,
+                color: context.sw.text,
               ),
             ),
             const SizedBox(height: 8),
@@ -301,7 +303,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
                   ? 'This user only shares their profile with people they\'ve matched with.'
                   : 'This user has chosen to keep their profile private.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey[600]),
+              style: TextStyle(color: context.sw.textMuted),
             ),
           ],
         ),
@@ -326,64 +328,74 @@ class _UserDetailPageState extends State<UserDetailPage> {
       slivers: [
         // App Bar
         SliverAppBar(
-          expandedHeight: 220,
+          expandedHeight: 300,
           pinned: true,
-          backgroundColor: Colors.white,
-          elevation: 2,
+          backgroundColor: context.sw.bg,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          leading: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Pressable(
+              onTap: () => Navigator.of(context).maybePop(),
+              child: Container(
+                decoration: BoxDecoration(color: context.sw.surface, shape: BoxShape.circle),
+                child: Icon(Icons.arrow_back_rounded,
+                    size: 20, color: context.sw.text, semanticLabel: 'Back'),
+              ),
+            ),
+          ),
           actions: [
             if (currentUserId != widget.userId)
-              IconButton(
-                icon: const Icon(Icons.more_vert, color: Colors.white),
-                tooltip: 'More options',
-                onPressed: () => showSafetySheet(
-                  context,
-                  userId: widget.userId,
-                  displayName: _userData!['name'] ?? 'this user',
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Pressable(
+                  onTap: () => showSafetySheet(
+                    context,
+                    userId: widget.userId,
+                    displayName: _userData!['name'] ?? 'this user',
+                  ),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration:
+                        BoxDecoration(color: context.sw.surface, shape: BoxShape.circle),
+                    child: Icon(Icons.more_horiz_rounded,
+                        size: 20, color: context.sw.text, semanticLabel: 'More options'),
+                  ),
                 ),
               ),
           ],
           flexibleSpace: FlexibleSpaceBar(
-            background: Container(
-              color: AppTheme.primaryColor,
-              child: Center(
-                // Pairs with the avatar in Discover's list view, so opening a
-                // profile visibly carries the person's photo across.
-                child: Hero(
-                  tag: 'avatar_${widget.userId}',
-                  child: CachedNetworkImage(
-                    imageUrl: _userData!['photoUrl'] ?? '',
-                    imageBuilder: (context, imageProvider) => CircleAvatar(
-                      radius: 70,
-                      backgroundImage: imageProvider,
+            background: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 56, 20, 8),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Pairs with the avatar in Discover's list view, so opening
+                    // a profile visibly carries the person's photo across.
+                    Hero(
+                      tag: 'avatar_${widget.userId}',
+                      child: SwapAvatar(
+                        name: (_userData!['name'] ?? 'A').toString(),
+                        photoUrl: (_userData!['photoUrl'] ?? '').toString(),
+                        size: 104,
+                        radius: 34,
+                      ),
                     ),
-                    placeholder: (context, url) => CircleAvatar(
-                      radius: 70,
-                      backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.2),
-                      child: const Icon(Icons.person, size: 70, color: Colors.white),
+                    const SizedBox(height: 14),
+                    Text(
+                      _userData!['name'] ?? 'Anonymous',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTheme.display(fontSize: 30, color: context.sw.text),
                     ),
-                    errorWidget: (context, url, error) => CircleAvatar(
-                      radius: 70,
-                      backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.2),
-                      child: const Icon(Icons.person, size: 70, color: Colors.white),
-                    ),
-                  ),
+                  ],
                 ),
               ),
             ),
-            title: Container(
-              color: AppTheme.primaryColor.withValues(alpha: 0.7),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-              child: Text(
-                _userData!['name'] ?? 'Anonymous',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 22,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ),
-            centerTitle: true,
           ),
         ),
         // User Info
@@ -405,19 +417,19 @@ class _UserDetailPageState extends State<UserDetailPage> {
                       itemCount: 5,
                       itemSize: 24,
                       ignoreGestures: true,
-                      itemBuilder: (context, _) => const Icon(
+                      itemBuilder: (context, _) => Icon(
                         Icons.star,
-                        color: AppTheme.primaryColor,
+                        color: context.sw.give,
                       ),
                       onRatingUpdate: (_) {},
                     ),
                     const SizedBox(width: 10),
                     Text(
                       rating.toStringAsFixed(1),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
-                        color: AppTheme.darkTextColor,
+                        color: context.sw.text,
                       ),
                     ),
                   ],
@@ -425,7 +437,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
                 Center(
                   child: Text(
                     '$completedSwaps completed skill swaps',
-                    style: TextStyle(color: Colors.grey[700], fontSize: 14),
+                    style: TextStyle(color: context.sw.textMuted, fontSize: 14),
                   ),
                 ),
                 _buildReliabilityRow(),
@@ -440,7 +452,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
                         const SizedBox(width: 6),
                         Text(
                           _userData!['email'],
-                          style: TextStyle(color: Colors.grey[700], fontSize: 14),
+                          style: TextStyle(color: context.sw.textMuted, fontSize: 14),
                         ),
                       ],
                     ),
@@ -449,12 +461,12 @@ class _UserDetailPageState extends State<UserDetailPage> {
                 const SizedBox(height: 18),
                 // Bio
                 if ((_userData!['bio']?.toString() ?? '').isNotEmpty) ...[
-                  const Text(
+                  Text(
                     'About Me',
                     style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.bold,
-                      color: AppTheme.primaryColor,
+                      color: context.sw.give,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -464,15 +476,15 @@ class _UserDetailPageState extends State<UserDetailPage> {
                 // Skills Section
                 if (shareSkills) ...[
                   Row(
-                    children: const [
-                      Icon(Icons.auto_fix_high, color: AppTheme.primaryColor),
+                    children: [
+                      Icon(Icons.auto_fix_high, color: context.sw.give),
                       SizedBox(width: 8),
                       Text(
                         'Skills Offered',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: AppTheme.primaryColor,
+                          color: context.sw.give,
                         ),
                       ),
                     ],
@@ -482,14 +494,14 @@ class _UserDetailPageState extends State<UserDetailPage> {
                   const SizedBox(height: 20),
                   Row(
                     children: [
-                      const Icon(Icons.search, color: AppTheme.tertiaryColor),
+                      Icon(Icons.search, color: context.sw.get),
                       const SizedBox(width: 8),
                       Text(
                         'Skills Wanted',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: AppTheme.tertiaryColor,
+                          color: context.sw.get,
                         ),
                       ),
                     ],
@@ -501,22 +513,22 @@ class _UserDetailPageState extends State<UserDetailPage> {
                   Text(
                     'This user has chosen not to share their skills.',
                     style: TextStyle(
-                        fontStyle: FontStyle.italic, color: Colors.grey[600]),
+                        fontStyle: FontStyle.italic, color: context.sw.textMuted),
                   ),
                   const SizedBox(height: 20),
                 ],
                 // Availability
                 if (shareAvailability) ...[
                   Row(
-                    children: const [
-                      Icon(Icons.access_time, color: AppTheme.tertiaryColor),
+                    children: [
+                      Icon(Icons.access_time, color: context.sw.get),
                       SizedBox(width: 8),
                       Text(
                         'Availability',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: AppTheme.tertiaryColor,
+                          color: context.sw.get,
                         ),
                       ),
                     ],
@@ -528,13 +540,13 @@ class _UserDetailPageState extends State<UserDetailPage> {
                     children: availability.map((day) => Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: AppTheme.tertiaryColor.withValues(alpha: 0.1),
+                        color: context.sw.get.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
-                          color: AppTheme.tertiaryColor.withValues(alpha: 0.3),
+                          color: context.sw.get.withValues(alpha: 0.3),
                         ),
                       ),
-                      child: Text(day, style: const TextStyle(fontSize: 13, color: AppTheme.tertiaryColor)),
+                      child: Text(day, style: TextStyle(fontSize: 13, color: context.sw.get)),
                     )).toList(),
                   ),
                   const SizedBox(height: 22),
@@ -551,7 +563,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
                           ? const Text('Sending...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600))
                           : const Text('Send Swap Request', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryColor,
+                        backgroundColor: context.sw.give,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
@@ -563,12 +575,12 @@ class _UserDetailPageState extends State<UserDetailPage> {
                   const SizedBox(height: 22),
                 ],
                 // Reviews section
-                const Text(
+                Text(
                   'Reviews',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.bold,
-                    color: AppTheme.primaryColor,
+                    color: context.sw.give,
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -595,14 +607,10 @@ class _UserDetailPageState extends State<UserDetailPage> {
               final reviewText = review['review'] ?? '';
               final tags = List<String>.from(review['tags'] ?? []);
               final timestamp = review['timestamp'] as Timestamp?;
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                elevation: 3,
-                shadowColor: Colors.black12,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Column(
+              return SurfaceCard(
+                margin: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+                padding: const EdgeInsets.all(18),
+                child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
@@ -615,12 +623,12 @@ class _UserDetailPageState extends State<UserDetailPage> {
                             ),
                             placeholder: (context, url) => CircleAvatar(
                               radius: 22,
-                              backgroundColor: Colors.grey[300],
+                              backgroundColor: context.sw.border,
                               child: const Icon(Icons.person, size: 22, color: Colors.grey),
                             ),
                             errorWidget: (context, url, error) => CircleAvatar(
                               radius: 22,
-                              backgroundColor: Colors.grey[300],
+                              backgroundColor: context.sw.border,
                               child: const Icon(Icons.person, size: 22, color: Colors.grey),
                             ),
                           ),
@@ -637,7 +645,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
                                   _formatDate(timestamp.toDate()),
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.grey[600],
+                                    color: context.sw.textMuted,
                                   ),
                                 ),
                             ],
@@ -653,9 +661,9 @@ class _UserDetailPageState extends State<UserDetailPage> {
                         itemCount: 5,
                         itemSize: 16,
                         ignoreGestures: true,
-                        itemBuilder: (context, _) => const Icon(
+                        itemBuilder: (context, _) => Icon(
                           Icons.star,
-                          color: AppTheme.primaryColor,
+                          color: context.sw.give,
                         ),
                         onRatingUpdate: (_) {},
                       ),
@@ -669,16 +677,16 @@ class _UserDetailPageState extends State<UserDetailPage> {
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 10, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: AppTheme.tertiaryColor
+                                      color: context.sw.get
                                           .withValues(alpha: 0.1),
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Text(
                                       tag,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
-                                        color: AppTheme.tertiaryColor,
+                                        color: context.sw.get,
                                       ),
                                     ),
                                   ))
@@ -690,7 +698,6 @@ class _UserDetailPageState extends State<UserDetailPage> {
                         Text(reviewText, style: const TextStyle(fontSize: 14)),
                       ],
                     ],
-                  ),
                 ),
               );
             },
@@ -711,7 +718,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
         isOffered ? 'No skills offered' : 'No skills wanted',
         style: TextStyle(
           fontStyle: FontStyle.italic,
-          color: Colors.grey[600],
+          color: context.sw.textMuted,
         ),
       );
     }
@@ -723,19 +730,19 @@ class _UserDetailPageState extends State<UserDetailPage> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: isOffered 
-              ? AppTheme.primaryColor.withValues(alpha: 0.1) 
-              : AppTheme.tertiaryColor.withValues(alpha: 0.1),
+              ? context.sw.give.withValues(alpha: 0.1) 
+              : context.sw.get.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: isOffered
-                ? AppTheme.primaryColor.withValues(alpha: 0.3)
-                : AppTheme.tertiaryColor.withValues(alpha: 0.3),
+                ? context.sw.give.withValues(alpha: 0.3)
+                : context.sw.get.withValues(alpha: 0.3),
           ),
         ),
         child: Text(
           skill,
           style: TextStyle(
-            color: isOffered ? AppTheme.primaryColor : AppTheme.tertiaryColor,
+            color: isOffered ? context.sw.give : context.sw.get,
           ),
         ),
       )).toList(),

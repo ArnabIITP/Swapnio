@@ -6,6 +6,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:swapnio/providers/app_state.dart';
 import '../../theme.dart';
+import '../../ui/swapnio_kit.dart';
+import '../../ui/swapnio_widgets.dart';
 
 class NotificationsPage extends StatefulWidget {
   const NotificationsPage({super.key});
@@ -36,100 +38,147 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final userId = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final c = context.sw;
     return Scaffold(
-      backgroundColor: AppTheme.backgroundLight,
-      appBar: AppBar(title: const Text('Notifications')),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: _notificationsStream,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.notifications_off,
-                      size: 72, color: AppTheme.warmBorder),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No notifications yet',
-                    style: GoogleFonts.ebGaramond(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
-                ],
+      backgroundColor: c.bg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SwapHeader(title: 'Notifications'),
+            Expanded(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: _notificationsStream,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final docs = snapshot.data?.docs ?? const [];
+                  if (docs.isEmpty) {
+                    return const SwapEmptyState(
+                      icon: Icons.notifications_none_rounded,
+                      title: 'Nothing new yet',
+                      message: 'Requests, accepted swaps and session reminders '
+                          'will show up here.',
+                    );
+                  }
+                  return ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                    itemCount: docs.length,
+                    itemBuilder: (context, index) {
+                      final data = docs[index].data() as Map<String, dynamic>;
+                      final message = (data['message'] ?? '').toString();
+                      final type = (data['type'] ?? 'info').toString();
+                      final senderPhoto = (data['senderPhoto'] ?? '').toString();
+                      final senderName = (data['senderName'] ?? '').toString();
+                      final timestamp = data['timestamp'] as Timestamp?;
+                      final time = timestamp != null ? _ago(timestamp.toDate()) : '';
+                      final accent = _accentForType(type, c);
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: SurfaceCard(
+                          padding: const EdgeInsets.all(14),
+                          radius: 18,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (senderPhoto.isNotEmpty)
+                                SwapAvatar(
+                                  name: senderName.isEmpty ? '?' : senderName,
+                                  photoUrl: senderPhoto,
+                                  size: 40,
+                                  radius: 14,
+                                )
+                              else
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: accent.withValues(alpha: 0.13),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: Icon(_iconForType(type), size: 19, color: accent),
+                                ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      message,
+                                      style: GoogleFonts.manrope(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: c.text,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                    if (time.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Text(time,
+                                          style: GoogleFonts.manrope(
+                                              fontSize: 11.5, color: c.textMuted)),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
               ),
-            );
-          }
-          final docs = snapshot.data!.docs;
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            itemCount: docs.length,
-            separatorBuilder: (_, __) =>
-                const Divider(height: 1, indent: 76),
-            itemBuilder: (context, index) {
-              final data = docs[index].data() as Map<String, dynamic>;
-              final message = data['message'] ?? '';
-              final type = data['type'] ?? 'info';
-              final senderPhoto = data['senderPhoto'] ?? '';
-              final timestamp = data['timestamp'] as Timestamp?;
-              final time = timestamp != null
-                  ? DateFormat.yMMMd().add_jm().format(timestamp.toDate())
-                  : '';
-              final icon = _iconForType(type);
-              final showAvatar = senderPhoto.isNotEmpty &&
-                  type == 'swap_request' &&
-                  index.isEven == false;
-              return ListTile(
-                leading: showAvatar
-                    ? CircleAvatar(
-                        radius: 24,
-                        backgroundImage: NetworkImage(senderPhoto),
-                        onBackgroundImageError: (_, __) {},
-                      )
-                    : CircleAvatar(
-                        radius: 24,
-                        backgroundColor:
-                            AppTheme.primaryColor.withValues(alpha: 0.12),
-                        child: Icon(icon, color: AppTheme.primaryColor),
-                      ),
-                title: Text(
-                  message,
-                  style: const TextStyle(fontSize: 14),
-                ),
-                subtitle: Text(
-                  time,
-                  style: TextStyle(
-                      fontSize: 12, color: Colors.grey[600]),
-                ),
-              );
-            },
-          );
-        },
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  String _ago(DateTime when) {
+    final d = DateTime.now().difference(when);
+    if (d.inMinutes < 1) return 'Just now';
+    if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+    if (d.inHours < 24) return '${d.inHours}h ago';
+    if (d.inDays < 7) return '${d.inDays}d ago';
+    return DateFormat.MMMd().add_jm().format(when);
+  }
+
+  Color _accentForType(String type, SwapnioColors c) {
+    switch (type) {
+      case 'swap_request':
+      case 'request_accepted':
+        return c.give;
+      case 'rating':
+        return c.success;
+      case 'session_reminder':
+      case 'session_proposed':
+      case 'session_rescheduled':
+        return c.get;
+      default:
+        return c.textMuted;
+    }
   }
 
   IconData _iconForType(String type) {
     switch (type) {
       case 'swap_request':
-        return Icons.swap_horiz;
+        return Icons.swap_horiz_rounded;
       case 'request_accepted':
-        return Icons.favorite;
+        return Icons.favorite_rounded;
       case 'rating':
-        return Icons.star;
+        return Icons.star_rounded;
       case 'session_reminder':
-        return Icons.event_available;
+        return Icons.event_available_rounded;
       case 'session_proposed':
       case 'session_rescheduled':
-        return Icons.event;
+        return Icons.event_rounded;
       default:
-        return Icons.notifications;
+        return Icons.notifications_rounded;
     }
   }
 }

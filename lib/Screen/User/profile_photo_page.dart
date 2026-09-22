@@ -84,7 +84,7 @@ class _ProfilePhotoPageState extends State<ProfilePhotoPage> {
                 'Add a profile photo',
                 style: theme.textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: AppTheme.darkTextColor,
+                  color: context.sw.text,
                 ),
               ),
               const SizedBox(height: 8),
@@ -98,15 +98,15 @@ class _ProfilePhotoPageState extends State<ProfilePhotoPage> {
                   onTap: _isUploading ? null : _choosePhoto,
                   child: CircleAvatar(
                     radius: 78,
-                    backgroundColor: AppTheme.warmBorder,
+                    backgroundColor: context.sw.border,
                     backgroundImage: _selectedImage == null
                         ? null
                         : FileImage(_selectedImage!),
                     child: _selectedImage == null
-                        ? const Icon(
+                        ? Icon(
                             Icons.add_a_photo_outlined,
                             size: 42,
-                            color: AppTheme.primaryColor,
+                            color: context.sw.give,
                           )
                         : null,
                   ),

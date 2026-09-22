@@ -4,6 +4,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import '../../theme.dart';
 import 'gamification_provider.dart';
+import '../../ui/swapnio_badges.dart';
+import '../../ui/swapnio_kit.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class GamificationScreen extends StatelessWidget {
   const GamificationScreen({super.key});
@@ -49,23 +52,8 @@ class GamificationScreen extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 20),
-                Text(
-                  'Badges:',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: gamification.badges.isEmpty
-                      ? const [Text('No badges yet - complete a swap session!')]
-                      : gamification.badges
-                          .map((b) => Chip(
-                                label: Text(b),
-                                backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.08),
-                                side: BorderSide(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
-                              ))
-                          .toList(),
-                ),
+                const KitSection('Badges'),
+                BadgeCollection(earnedIds: gamification.badges),
                 const SizedBox(height: 24),
                 Text(
                   'Leaderboard',
@@ -87,28 +75,39 @@ class GamificationScreen extends StatelessWidget {
     required String label,
     required String value,
   }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.warmBorder),
-      ),
+    final c = context.sw;
+    return SurfaceCard(
       child: Row(
         children: [
-          Icon(icon, color: AppTheme.primaryColor, size: 30),
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: c.give.withValues(alpha: 0.13),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: c.give, size: 21),
+          ),
           const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(value,
-                  style: const TextStyle(
-                      fontSize: 22, fontWeight: FontWeight.bold)),
-              Text(label,
-                  style: TextStyle(
-                      fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: num.tryParse(value) == null
+                      ? Text(value, style: AppTheme.display(fontSize: 24, color: c.text))
+                      : CountUpText(
+                          value: num.parse(value),
+                          style: AppTheme.display(fontSize: 24, color: c.text),
+                        ),
+                ),
+                Text(label,
+                    style: GoogleFonts.manrope(
+                        fontSize: 11.5, fontWeight: FontWeight.w700, color: c.textMuted)),
+              ],
+            ),
           ),
         ],
       ),
@@ -154,7 +153,7 @@ class GamificationScreen extends StatelessWidget {
                   ListTile(
                     leading: CircleAvatar(
                       backgroundColor: i < 3
-                          ? AppTheme.primaryColor.withValues(alpha: 0.15)
+                          ? context.sw.give.withValues(alpha: 0.15)
                           : Theme.of(context)
                               .colorScheme
                               .surfaceContainerHighest,
@@ -164,7 +163,7 @@ class GamificationScreen extends StatelessWidget {
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
                           color: i < 3
-                              ? AppTheme.primaryColor
+                              ? context.sw.give
                               : Theme.of(context)
                                   .colorScheme
                                   .onSurfaceVariant,

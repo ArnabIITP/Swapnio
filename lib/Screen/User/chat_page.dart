@@ -6,10 +6,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:intl/intl.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../providers/app_state.dart';
 import '../../services/swap_service.dart';
 import '../../theme.dart';
+import '../../ui/swapnio_widgets.dart';
 import '../../ui/safety_sheet.dart';
 
 class ChatPage extends StatefulWidget {
@@ -49,6 +52,8 @@ class _ChatPageState extends State<ChatPage> {
   // The room doc carries presence-style state (who's typing, when each side
   // last read) so it can be watched separately from the message list.
   late final Stream<DocumentSnapshot> _roomStream;
+  late final Future<DocumentSnapshot> _otherUserFuture;
+  final FocusNode _messageFocusNode = FocusNode();
   int _lastMessageCount = 0;
   bool _showScrollToBottom = false;
   Timer? _typingClearTimer;
@@ -85,6 +90,10 @@ class _ChatPageState extends State<ChatPage> {
         .orderBy('timestamp')
         .snapshots(includeMetadataChanges: true);
     _roomStream = _roomRef.snapshots();
+    _otherUserFuture = FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.otherUserId)
+        .get();
     _messageController.addListener(_onTypingChanged);
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -147,6 +156,7 @@ class _ChatPageState extends State<ChatPage> {
     _typingExpiryTimer?.cancel();
     _messageController.removeListener(_onTypingChanged);
     _messageController.dispose();
+    _messageFocusNode.dispose();
     _scrollController.dispose();
     _reviewController.dispose();
     super.dispose();
@@ -333,37 +343,28 @@ class _ChatPageState extends State<ChatPage> {
         titleSpacing: 0,
         title: Row(
           children: [
-            CachedNetworkImage(
-              imageUrl: widget.otherUserPhoto,
-              imageBuilder: (context, imageProvider) =>
-                  CircleAvatar(radius: 20, backgroundImage: imageProvider),
-              placeholder: (context, url) => CircleAvatar(
-                radius: 20,
-                backgroundColor: Colors.grey[300],
-                child: const Icon(Icons.person, size: 20, color: Colors.grey),
-              ),
-              errorWidget: (context, url, error) => CircleAvatar(
-                radius: 20,
-                backgroundColor: Colors.grey[300],
-                child: const Icon(Icons.person, size: 20, color: Colors.grey),
-              ),
+            SwapAvatar(
+              name: widget.otherUserName,
+              photoUrl: widget.otherUserPhoto,
+              size: 40,
+              radius: 14,
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 12),
             Text(
               widget.otherUserName,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface,
-                fontWeight: FontWeight.w700,
-                fontSize: 18,
+              style: GoogleFonts.manrope(
+                color: context.sw.text,
+                fontWeight: FontWeight.w800,
+                fontSize: 17,
               ),
             ),
           ],
         ),
         actions: [
           IconButton(
-            icon: const Icon(
+            icon: Icon(
               Icons.event_available,
-              color: AppTheme.primaryColor,
+              color: context.sw.give,
             ),
             tooltip: 'Propose swap session',
             onPressed: _showProposeSessionDialog,
@@ -373,7 +374,7 @@ class _ChatPageState extends State<ChatPage> {
               Icons.star_rate,
               color: _completedSwapId == null
                   ? Colors.grey
-                  : AppTheme.primaryColor,
+                  : context.sw.give,
             ),
             tooltip: _completedSwapId == null
                 ? 'Complete a swap session to unlock ratings'
@@ -444,7 +445,7 @@ class _ChatPageState extends State<ChatPage> {
                         bottom: 14,
                         child: FloatingActionButton.small(
                           heroTag: 'chat_scroll_bottom',
-                          backgroundColor: AppTheme.primaryColor,
+                          backgroundColor: context.sw.give,
                           foregroundColor: Colors.white,
                           tooltip: 'Jump to latest',
                           onPressed: () {
@@ -528,6 +529,7 @@ class _ChatPageState extends State<ChatPage> {
                   Expanded(
                     child: TextField(
                       controller: _messageController,
+                      focusNode: _messageFocusNode,
                       decoration: InputDecoration(
                         hintText: 'Type a message...',
                         contentPadding: const EdgeInsets.symmetric(
@@ -550,21 +552,17 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryColor,
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.07),
-                          blurRadius: 2,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: IconButton(
-                      icon: const Icon(Icons.send, color: Colors.white),
-                      onPressed: _sendMessage,
+                  Pressable(
+                    onTap: _sendMessage,
+                    child: Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: context.sw.give,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.arrow_upward_rounded,
+                          color: Colors.white, semanticLabel: 'Send'),
                     ),
                   ),
                 ],
@@ -637,10 +635,10 @@ class _ChatPageState extends State<ChatPage> {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.event,
                       size: 18,
-                      color: AppTheme.primaryColor,
+                      color: dialogContext.sw.give,
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -743,8 +741,125 @@ class _ChatPageState extends State<ChatPage> {
               ? 'Session proposed - they can accept it from the Requests tab'
               : 'Could not propose the session. Please try again.',
         ),
-        backgroundColor: ok ? AppTheme.primaryColor : Colors.redAccent,
+        backgroundColor: ok ? context.sw.give : Colors.redAccent,
       ),
+    );
+  }
+
+  /// A blank thread is where new matches stall: the first message is the
+  /// hard part. Naming why you matched and offering an opener (which the
+  /// person can edit before sending) removes most of that friction.
+  Widget _buildChatEmptyState() {
+    final c = context.sw;
+    return FutureBuilder<DocumentSnapshot>(
+      future: _otherUserFuture,
+      builder: (context, snapshot) {
+        final other = snapshot.data?.data() as Map<String, dynamic>?;
+        final theyTeach = List<String>.from(other?['skillsOffered'] ?? []);
+        final theyWant = List<String>.from(other?['skillsWanted'] ?? []);
+        final me = Provider.of<AppState>(context, listen: false).currentUser;
+        final myWant = me?.skillsWanted.map((e) => e.toLowerCase()).toSet() ?? <String>{};
+        final myTeach = me?.skillsOffered.map((e) => e.toLowerCase()).toSet() ?? <String>{};
+
+        String pick(List<String> theirs, Set<String> mine) {
+          for (final skill in theirs) {
+            if (mine.contains(skill.toLowerCase())) return skill;
+          }
+          return theirs.isNotEmpty ? theirs.first : '';
+        }
+
+        final youGet = pick(theyTeach, myWant);
+        final youGive = pick(theyWant, myTeach);
+        final firstName = widget.otherUserName.split(' ').first;
+        final openers = <String>[
+          if (youGet.isNotEmpty)
+            'Hey $firstName! How did you get into $youGet?'
+          else
+            'Hey $firstName! What are you hoping to learn right now?',
+          if (youGive.isNotEmpty)
+            'I could walk you through $youGive - what level are you at?'
+          else
+            'Want to set up a short intro call this week?',
+          'Want to start with a 30-minute intro session?',
+        ];
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: c.win,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Icon(Icons.handshake_rounded, color: c.onWin, size: 28),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                youGet.isNotEmpty && youGive.isNotEmpty
+                    ? 'A perfect swap, both ways'
+                    : 'You matched',
+                textAlign: TextAlign.center,
+                style: AppTheme.display(fontSize: 24, color: c.text),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Tap a question to fill it in - you can edit it before sending.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.manrope(fontSize: 13, color: c.textMuted, height: 1.4),
+              ),
+              if (youGet.isNotEmpty || youGive.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                SwapSplit(
+                  giveLabel: 'YOU TEACH',
+                  giveSkill: youGive.isEmpty ? 'Your skills' : youGive,
+                  getLabel: '${firstName.toUpperCase()} TEACHES',
+                  getSkill: youGet.isEmpty ? 'Their skills' : youGet,
+                ),
+              ],
+              const SizedBox(height: 18),
+              for (final opener in openers)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Pressable(
+                    onTap: () {
+                      _messageController.text = opener;
+                      _messageController.selection = TextSelection.fromPosition(
+                        TextPosition(offset: opener.length),
+                      );
+                      _messageFocusNode.requestFocus();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: c.surface,
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(18),
+                          topRight: Radius.circular(18),
+                          bottomRight: Radius.circular(18),
+                          bottomLeft: Radius.circular(4),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.auto_awesome_rounded, size: 14, color: c.give),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(opener,
+                                style: GoogleFonts.manrope(fontSize: 13, color: c.text)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -799,10 +914,17 @@ class _ChatPageState extends State<ChatPage> {
             !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const Center(
-            child: Text('No messages yet. Start a conversation!'),
-          );
+        // A brand-new room already contains the "swap matched" system
+        // message, so an empty *conversation* is not an empty collection.
+        final allDocs = snapshot.data?.docs ?? const [];
+        final hasRealMessage = allDocs.any((doc) {
+          final data = doc.data() as Map<String, dynamic>?;
+          if (data == null) return false;
+          return data['type']?.toString() != 'system' &&
+              data['senderId']?.toString() != 'system';
+        });
+        if (!hasRealMessage) {
+          return _buildChatEmptyState();
         }
 
         // A just-sent message has a null server timestamp until confirmed,
@@ -946,7 +1068,7 @@ class _ChatPageState extends State<ChatPage> {
           style: TextStyle(
             fontSize: 12,
             fontStyle: FontStyle.italic,
-            color: Colors.grey[600],
+            color: context.sw.textMuted,
           ),
         ),
       ),
@@ -978,7 +1100,7 @@ class _ChatPageState extends State<ChatPage> {
             const SizedBox(width: 8),
             Text(
               '${widget.otherUserName.split(' ').first} is typing',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              style: TextStyle(fontSize: 12, color: context.sw.textMuted),
             ),
           ],
         ),
@@ -1029,7 +1151,7 @@ class _ChatPageState extends State<ChatPage> {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: selected
-                            ? AppTheme.primaryColor.withValues(alpha: 0.18)
+                            ? sheetContext.sw.give.withValues(alpha: 0.18)
                             : Colors.transparent,
                       ),
                       child: Text(emoji, style: const TextStyle(fontSize: 26)),
@@ -1096,7 +1218,7 @@ class _ChatPageState extends State<ChatPage> {
                 ),
                 decoration: BoxDecoration(
                   color: isCurrentUser
-                      ? AppTheme.primaryColor.withValues(alpha: 0.13)
+                      ? context.sw.give.withValues(alpha: 0.13)
                       : Theme.of(context).colorScheme.surface,
                   borderRadius: BorderRadius.only(
                     topLeft: Radius.circular(isCurrentUser ? 16 : 4),
@@ -1130,7 +1252,7 @@ class _ChatPageState extends State<ChatPage> {
                           time,
                           style: TextStyle(
                             fontSize: 10,
-                            color: Colors.grey[600],
+                            color: context.sw.textMuted,
                           ),
                         ),
                         if (isCurrentUser) ...[
@@ -1156,7 +1278,7 @@ class _ChatPageState extends State<ChatPage> {
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surface,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.warmBorder),
+                  border: Border.all(color: context.sw.border),
                 ),
                 child: Text(
                   reactions.values.toSet().join(' ') +
@@ -1170,7 +1292,7 @@ class _ChatPageState extends State<ChatPage> {
               padding: const EdgeInsets.only(right: 4, bottom: 2),
               child: Text(
                 'Seen',
-                style: TextStyle(fontSize: 10.5, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 10.5, color: context.sw.textMuted),
               ),
             ),
         ],
@@ -1219,7 +1341,7 @@ class _ChatPageState extends State<ChatPage> {
                     itemSize: 16,
                     ignoreGestures: true,
                     itemBuilder: (context, _) =>
-                        const Icon(Icons.star, color: AppTheme.primaryColor),
+                        Icon(Icons.star, color: context.sw.give),
                     onRatingUpdate: (_) {},
                   ),
                 ],
@@ -1288,7 +1410,7 @@ class _ChatPageState extends State<ChatPage> {
               allowHalfRating: true,
               itemCount: 5,
               itemBuilder: (context, _) =>
-                  const Icon(Icons.star, color: AppTheme.primaryColor),
+                  Icon(Icons.star, color: context.sw.give),
               onRatingUpdate: (rating) {
                 setState(() {
                   _rating = rating;
@@ -1315,8 +1437,8 @@ class _ChatPageState extends State<ChatPage> {
                     }
                   });
                 },
-                selectedColor: AppTheme.primaryColor.withValues(alpha: 0.2),
-                checkmarkColor: AppTheme.primaryColor,
+                selectedColor: context.sw.give.withValues(alpha: 0.2),
+                checkmarkColor: context.sw.give,
                 visualDensity: VisualDensity.compact,
               );
             }).toList(),
@@ -1328,7 +1450,7 @@ class _ChatPageState extends State<ChatPage> {
               hintText: 'Write a review (optional)',
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade300),
+                borderSide: BorderSide(color: context.sw.border),
               ),
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14,
@@ -1343,7 +1465,7 @@ class _ChatPageState extends State<ChatPage> {
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryColor,
+                backgroundColor: context.sw.give,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 textStyle: const TextStyle(
@@ -1437,7 +1559,7 @@ class _TypingDotsState extends State<_TypingDots>
                 width: 6,
                 height: 6,
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryColor.withValues(
+                  color: context.sw.give.withValues(
                     alpha: 0.45 + 0.55 * lift,
                   ),
                   shape: BoxShape.circle,

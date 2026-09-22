@@ -3,7 +3,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/app_state.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../theme.dart';
+import '../../ui/swapnio_kit.dart';
+import '../../ui/swapnio_widgets.dart';
 
 class PrivacySettingsPage extends StatefulWidget {
   const PrivacySettingsPage({super.key});
@@ -98,16 +101,14 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.backgroundLight,
-      appBar: AppBar(
-        title: const Text('Privacy Settings', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        foregroundColor: AppTheme.primaryColor,
-        elevation: 1.5,
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: AppTheme.primaryColor),
-      ),
-      body: _isLoading
+      backgroundColor: context.sw.bg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SwapHeader(title: 'Privacy', subtitle: 'Control what other people can see'),
+            Expanded(child: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(20),
@@ -127,7 +128,6 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
                     });
                   },
                 ),
-                _buildDivider(),
                 _buildSettingSwitch(
                   title: 'Share Skills',
                   subtitle: 'Make your skills visible to other users',
@@ -138,7 +138,6 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
                     });
                   },
                 ),
-                _buildDivider(),
                 _buildSettingSwitch(
                   title: 'Share Availability',
                   subtitle: 'Allow others to see when you are available',
@@ -149,7 +148,6 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
                     });
                   },
                 ),
-                _buildDivider(),
                 _buildSettingSwitch(
                   title: 'Hide Location',
                   subtitle: 'Don\'t show your approximate location to others',
@@ -160,7 +158,6 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
                     });
                   },
                 ),
-                _buildDivider(),
                 _buildSettingSwitch(
                   title: 'Allow Data Collection',
                   subtitle: 'Help us improve by sharing anonymous usage data',
@@ -174,56 +171,40 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
                 const SizedBox(height: 28),
                 _buildAppearanceSection(),
                 const SizedBox(height: 28),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryColor,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    elevation: 0,
-                  ),
-                  onPressed: _savePrivacySettings,
-                  child: const Text('Save Changes'),
-                ),
+                PillButton(label: 'Save Changes', onTap: _savePrivacySettings),
                 const SizedBox(height: 8),
                 Center(
                   child: Text(
                     'Looking to delete your account? That\'s in Profile > Settings.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                    style: TextStyle(color: context.sw.textMuted, fontSize: 13),
                   ),
                 ),
               ],
             ),
+            ),
+          ],
+        ),
+      ),
     );
   }
   
   Widget _buildInfoCard() {
-    return Card(
-      elevation: 3,
-      shadowColor: Colors.black12,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      color: Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+    return SurfaceCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.privacy_tip, color: AppTheme.primaryColor, size: 28),
+                Icon(Icons.privacy_tip, color: context.sw.give, size: 28),
                 const SizedBox(width: 10),
-                const Text(
+                Text(
                   'Privacy Preferences',
                   style: TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.bold,
-                    color: AppTheme.darkTextColor,
+                    color: context.sw.text,
                   ),
                 ),
               ],
@@ -235,7 +216,6 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
             ),
           ],
         ),
-      ),
     );
   }
   
@@ -243,12 +223,12 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Profile Visibility',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w700,
-            color: AppTheme.primaryColor,
+            color: context.sw.give,
           ),
         ),
         const SizedBox(height: 4),
@@ -262,8 +242,8 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
         const SizedBox(height: 10),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: AppTheme.primaryColor, width: 1.1),
+            color: context.sw.surface,
+            border: Border.all(color: context.sw.give, width: 1.1),
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
@@ -312,61 +292,61 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
+    final c = context.sw;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.darkTextColor,
+      padding: const EdgeInsets.only(bottom: 8),
+      child: SurfaceCard(
+        padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
+        radius: 18,
+        onTap: () => onChanged(!value),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.manrope(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: c.text,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Color(0xFF888888),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeColor: AppTheme.primaryColor,
-            inactiveTrackColor: Colors.grey.shade300,
-          ),
-        ],
+            const SizedBox(width: 8),
+            Switch(
+              value: value,
+              onChanged: onChanged,
+              thumbColor: const WidgetStatePropertyAll(Colors.white),
+              activeTrackColor: c.give,
+              inactiveThumbColor: c.surface,
+              inactiveTrackColor: c.surfaceLow,
+              trackOutlineColor: WidgetStatePropertyAll(c.border),
+            ),
+          ],
+        ),
       ),
     );
   }
-  
+
   Widget _buildAppearanceSection() {
     final appState = Provider.of<AppState>(context);
-    return Card(
-      elevation: 3,
-      shadowColor: Colors.black12,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      color: Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+    return SurfaceCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              children: const [
-                Icon(Icons.brightness_6, color: AppTheme.primaryColor, size: 28),
+              children: [
+                Icon(Icons.brightness_6, color: context.sw.give, size: 28),
                 SizedBox(width: 10),
                 Text(
                   'Appearance',
@@ -393,35 +373,43 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
             ),
           ],
         ),
-      ),
     );
   }
 
   Widget _buildThemeChip(String label, ThemeMode current) {
+    final c = context.sw;
     final themeMode = label == 'Dark' ? ThemeMode.dark : ThemeMode.light;
     final selected = current == themeMode;
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      selectedColor: AppTheme.primaryColor,
-      backgroundColor: Colors.white,
-      labelStyle: TextStyle(
-        color: selected ? Colors.white : AppTheme.darkTextColor,
-        fontWeight: FontWeight.bold,
+    return Pressable(
+      onTap: () => Provider.of<AppState>(context, listen: false).setThemeMode(themeMode),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        decoration: BoxDecoration(
+          color: selected ? c.cta : c.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: selected ? c.cta : c.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              label == 'Dark' ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+              size: 16,
+              color: selected ? c.onCta : c.textMuted,
+            ),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              style: GoogleFonts.manrope(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: selected ? c.onCta : c.text,
+              ),
+            ),
+          ],
+        ),
       ),
-      onSelected: (_) {
-        Provider.of<AppState>(context, listen: false).setThemeMode(themeMode);
-      },
     );
   }
 
-  Widget _buildDivider() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Divider(
-        color: Colors.grey.shade300,
-        height: 1,
-      ),
-    );
-  }
 }

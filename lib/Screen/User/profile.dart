@@ -14,7 +14,12 @@ import '../../features/gamification/gamification_model.dart';
 import '../../features/gamification/gamification_provider.dart';
 import '../../services/skill_catalog_service.dart';
 import '../../services/swap_service.dart';
+import 'package:google_fonts/google_fonts.dart';
+
 import '../../theme.dart';
+import '../../ui/swapnio_badges.dart';
+import '../../ui/swapnio_kit.dart';
+import '../../ui/swapnio_widgets.dart';
 import '../../ui/skill_suggestion_chips.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -36,7 +41,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       return;
     }
     _isSettingsSheetOpen = true;
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -44,8 +49,8 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         height: MediaQuery.of(sheetContext).size.height * 0.85,
         child: Container(
           decoration: BoxDecoration(
-            color: Theme.of(sheetContext).scaffoldBackgroundColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            color: sheetContext.sw.bg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
           ),
           child: Column(
             children: [
@@ -54,10 +59,21 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade400,
+                  color: sheetContext.sw.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Text('Settings',
+                        style: AppTheme.display(fontSize: 26, color: sheetContext.sw.text)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
               Expanded(child: _SettingsTabView(userData: userData)),
             ],
           ),
@@ -132,7 +148,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           body: user == null
               ? const Center(child: Text("No user logged in"))
               : isLoading
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const SafeArea(child: ProfileSkeleton())
                   : userData == null
                       ? const Center(child: Text("Failed to load profile"))
                       : SafeArea(
@@ -152,11 +168,11 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                               floating: true,
                               snap: true,
                               automaticallyImplyLeading: false,
-                              backgroundColor: Colors.transparent,
+                              backgroundColor: context.sw.bg,
                               elevation: 0,
                               toolbarHeight: 0,
                               collapsedHeight: 0,
-                              expandedHeight: 260,
+                              expandedHeight: 372,
                               flexibleSpace: FlexibleSpaceBar(
                                 background: ClipRect(
                                   child: _buildProfileHeader(context, user, userData, colorScheme),
@@ -167,27 +183,31 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                           body: Column(
                             children: [
                               Container(
-                                margin: const EdgeInsets.symmetric(horizontal: 16),
+                                margin: const EdgeInsets.symmetric(horizontal: 20),
+                                padding: const EdgeInsets.all(4),
                                 decoration: BoxDecoration(
-                                  color: Theme.of(context).colorScheme.surface,
-                                  borderRadius: BorderRadius.circular(25),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(alpha: 0.05),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 5),
-                                    ),
-                                  ],
+                                  color: context.sw.surfaceLow,
+                                  borderRadius: BorderRadius.circular(16),
                                 ),
                                 child: TabBar(
                                   controller: _tabController,
-                                  labelColor: colorScheme.primary,
-                                  unselectedLabelColor: Colors.grey,
-                                  indicatorColor: colorScheme.primary,
+                                  indicator: BoxDecoration(
+                                    color: context.sw.cta,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  indicatorSize: TabBarIndicatorSize.tab,
+                                  dividerHeight: 0,
+                                  labelColor: context.sw.onCta,
+                                  unselectedLabelColor: context.sw.textMuted,
+                                  labelStyle: GoogleFonts.manrope(
+                                      fontWeight: FontWeight.w800, fontSize: 13.5),
+                                  unselectedLabelStyle: GoogleFonts.manrope(
+                                      fontWeight: FontWeight.w700, fontSize: 13.5),
+                                  splashBorderRadius: BorderRadius.circular(12),
                                   tabs: const [
-                                    Tab(text: 'About', icon: Icon(Icons.person)),
-                                    Tab(text: 'Skills', icon: Icon(Icons.lightbulb)),
-                                    Tab(text: 'Activity', icon: Icon(Icons.emoji_events)),
+                                    Tab(height: 40, text: 'About'),
+                                    Tab(height: 40, text: 'Skills'),
+                                    Tab(height: 40, text: 'Activity'),
                                   ],
                                 ),
                               ),
@@ -213,191 +233,153 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
 
   Widget _buildProfileHeader(BuildContext context, User user,
       Map<String, dynamic> userData, ColorScheme colorScheme) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [AppTheme.primaryColor, AppTheme.tertiaryColor],
+    final c = context.sw;
+    final name = (userData['name'] ?? '').toString().trim();
+    final offered = List<String>.from(userData['skillsOffered'] ?? []);
+    final wanted = List<String>.from(userData['skillsWanted'] ?? []);
+    final rating = (userData['rating'] as num?)?.toDouble() ?? 0.0;
+    final swaps = (userData['completedSwaps'] as num?)?.toInt() ?? 0;
+
+    return Container(
+      color: c.bg,
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Spacer(),
+              Tooltip(
+                message: 'Settings',
+                child: Pressable(
+                  onTap: () => _toggleSettingsSheet(userData),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(color: c.surface, shape: BoxShape.circle),
+                    child: Icon(Icons.settings_outlined,
+                        size: 20, color: c.text, semanticLabel: 'Settings'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Hero(
+            tag: 'profile_avatar',
+            child: SwapAvatar(
+              name: name.isEmpty ? 'A' : name,
+              photoUrl: userData['photoUrl'] as String?,
+              size: 84,
+              radius: 28,
             ),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'My Profile',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.settings, color: Colors.white),
-                      tooltip: 'Settings',
-                      onPressed: () => _toggleSettingsSheet(userData),
-                    ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 4, left: 16, right: 16),
-                child: Row(
-                  children: [
-                    Hero(
-                      tag: 'profile_avatar',
-                      child: CircleAvatar(
-                        radius: 40,
-                        backgroundColor: Colors.white,
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
-                          child: Text(
-                            userData['name']?.toString().isNotEmpty == true
-                              ? userData['name']!.toString().substring(0, 1).toUpperCase()
-                              : 'A',
-                            key: ValueKey(userData['name']),
-                            style: TextStyle(
-                              fontSize: 32,
-                              fontWeight: FontWeight.bold,
-                              color: colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 18),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 300),
-                            child: Text(
-                              userData['name']?.toString() ?? 'Anonymous User',
-                              key: ValueKey(userData['name']),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            user.email ?? 'No email',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-            ],
+          const SizedBox(height: 10),
+          Text(
+            name.isEmpty ? 'Anonymous User' : name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTheme.display(fontSize: 26, color: c.text),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          const SizedBox(height: 2),
+          Text(
+            swaps == 0
+                ? 'Member for ${_getMembershipDuration(userData['memberSince'])}'
+                : '$swaps swap${swaps == 1 ? '' : 's'} · member for ${_getMembershipDuration(userData['memberSince'])}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted),
+          ),
+          if (offered.isNotEmpty || wanted.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            SwapSplit(
+              giveLabel: 'TEACHES',
+              giveSkill: offered.isEmpty ? 'Nothing yet' : offered.first,
+              getLabel: 'LEARNING',
+              getSkill: wanted.isEmpty ? 'Nothing yet' : wanted.first,
+            ),
+          ],
+          const SizedBox(height: 12),
+          Row(
             children: [
               Expanded(
                 child: _buildStatCard(
-                  label: 'RATING',
-                  value: ((userData['rating'] as num?)?.toDouble() ?? 0.0)
-                      .toStringAsFixed(1),
-                  icon: Icons.star,
-                  iconColor: AppTheme.primaryColor,
+                  label: 'rating',
+                  value: rating > 0 ? rating.toStringAsFixed(1) : '-',
+                  countValue: rating > 0 ? rating : null,
+                  decimals: 1,
+                  color: c.give,
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: _buildStatCard(
-                  label: 'SWAPS',
-                  value: (userData['completedSwaps'] ?? 0).toString(),
-                  icon: Icons.swap_horiz,
-                  iconColor: colorScheme.primary,
-                ),
+                    label: 'swaps', value: '$swaps', countValue: swaps, color: c.get),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: _buildStatCard(
-                  label: 'MEMBER FOR',
-                  value: _getMembershipDuration(userData['memberSince']),
-                  icon: Icons.calendar_month,
-                  iconColor: AppTheme.tertiaryColor,
+                  label: 'profile',
+                  value: '${(_profileStrength(userData) * 100).round()}%',
+                  countValue: (_profileStrength(userData) * 100).round(),
+                  suffix: '%',
+                  color: c.success,
                 ),
               ),
             ],
           ),
-        ),
-      ],
+        ],
+      ),
     );
+  }
+
+  /// Endowed progress: the meter counts what is already there, so finishing
+  /// feels like completing something rather than starting from zero.
+  double _profileStrength(Map<String, dynamic> userData) {
+    final checks = [
+      (userData['photoUrl'] ?? '').toString().isNotEmpty,
+      (userData['bio'] ?? '').toString().trim().isNotEmpty,
+      List<String>.from(userData['skillsOffered'] ?? []).isNotEmpty,
+      List<String>.from(userData['skillsWanted'] ?? []).isNotEmpty,
+      List<String>.from(userData['availability'] ?? []).isNotEmpty,
+    ];
+    return checks.where((v) => v).length / checks.length;
   }
 
   Widget _buildStatCard({
     required String label,
     required String value,
-    required IconData icon,
-    required Color iconColor,
+    required Color color,
+    num? countValue,
+    int decimals = 0,
+    String suffix = '',
   }) {
-    return Card(
-      elevation: 2,
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: iconColor, size: 20),
-            const SizedBox(height: 4),
-            TweenAnimationBuilder<double>(
-              duration: const Duration(milliseconds: 500),
-              tween: Tween<double>(begin: 0, end: 1),
-              builder: (context, value, child) {
-                return Opacity(opacity: value, child: child);
-              },
-              child: Text(
-                value,
-                key: ValueKey(value),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10,
-                color: Colors.grey.shade600,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
+    final c = context.sw;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(18)),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: countValue == null
+                ? Text(value, style: AppTheme.display(fontSize: 22, color: color))
+                : CountUpText(
+                    value: countValue,
+                    decimals: decimals,
+                    suffix: suffix,
+                    style: AppTheme.display(fontSize: 22, color: color),
+                  ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.manrope(
+                fontSize: 10.5, fontWeight: FontWeight.w700, color: c.textMuted),
+          ),
+        ],
       ),
     );
   }
@@ -617,9 +599,8 @@ class _AboutTabViewState extends State<_AboutTabView> {
     
     final days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return SurfaceCard(
+      padding: EdgeInsets.zero,
       child: Column(
         children: [
           Container(
@@ -627,7 +608,7 @@ class _AboutTabViewState extends State<_AboutTabView> {
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
             decoration: BoxDecoration(
               color: availabilityList.contains(currentDay) 
-                  ? AppTheme.tertiaryColor.withValues(alpha: 0.1) 
+                  ? context.sw.get.withValues(alpha: 0.1) 
                   : Colors.grey.withValues(alpha: 0.1),
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(12),
@@ -641,7 +622,7 @@ class _AboutTabViewState extends State<_AboutTabView> {
                       ? Icons.circle
                       : Icons.circle_outlined,
                   color: availabilityList.contains(currentDay)
-                      ? AppTheme.tertiaryColor
+                      ? context.sw.get
                       : Colors.grey,
                   size: 14,
                 ),
@@ -654,7 +635,7 @@ class _AboutTabViewState extends State<_AboutTabView> {
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
                     color: availabilityList.contains(currentDay)
-                        ? AppTheme.tertiaryColor
+                        ? context.sw.get
                         : Colors.grey,
                   ),
                 ),
@@ -674,7 +655,7 @@ class _AboutTabViewState extends State<_AboutTabView> {
                     children: [
                       Icon(
                         isAvailable ? Icons.check_circle : Icons.cancel,
-                        color: isAvailable ? AppTheme.tertiaryColor : Colors.grey,
+                        color: isAvailable ? context.sw.get : Colors.grey,
                         size: isToday ? 22 : 18,
                       ),
                       const SizedBox(width: 12),
@@ -683,7 +664,7 @@ class _AboutTabViewState extends State<_AboutTabView> {
                         style: TextStyle(
                           fontSize: isToday ? 17 : 16,
                           fontWeight: isToday || isAvailable ? FontWeight.bold : FontWeight.normal,
-                          color: isToday ? AppTheme.darkTextColor : (isAvailable ? AppTheme.darkTextColor : Colors.grey),
+                          color: isToday ? context.sw.text : (isAvailable ? context.sw.text : Colors.grey),
                         ),
                       ),
                     ],
@@ -800,7 +781,7 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
           content: Text(isOffered
               ? '$count ${count == 1 ? 'person wants' : 'people want'} to learn $skill'
               : '$count ${count == 1 ? 'person teaches' : 'people teach'} $skill - check Discover'),
-          backgroundColor: AppTheme.primaryColor,
+          backgroundColor: context.sw.give,
         ),
       );
     } catch (_) {
@@ -1005,50 +986,28 @@ class _SettingsTabView extends StatelessWidget {
               icon: Icons.edit,
               title: 'Edit Profile',
               subtitle: 'Update your profile information',
-              onTap: () {
-                Navigator.push(
-                  context, 
-                  MaterialPageRoute(builder: (context) => const ProfileSetupPage())
-                );
-              },
+              onTap: () => _closeThenPush(context, const ProfileSetupPage()),
             ),
-            const SizedBox(height: 16),
             _buildSettingsButton(
               context,
               icon: Icons.notifications,
               title: 'Notification Settings',
               subtitle: 'Manage your notification preferences',
-              onTap: () {
-                Navigator.push(
-                  context, 
-                  MaterialPageRoute(builder: (context) => const NotificationSettingsPage())
-                );
-              },
+              onTap: () => _closeThenPush(context, const NotificationSettingsPage()),
             ),
-            const SizedBox(height: 16),
             _buildSettingsButton(
               context,
               icon: Icons.lock,
               title: 'Privacy Settings',
               subtitle: 'Control your privacy preferences',
-              onTap: () {
-                Navigator.push(
-                  context, 
-                  MaterialPageRoute(builder: (context) => const PrivacySettingsPage())
-                );
-              },
+              onTap: () => _closeThenPush(context, const PrivacySettingsPage()),
             ),
             const SizedBox(height: 24),
             Padding(
               padding: const EdgeInsets.only(left: 4),
               child: Text(
-                'Community & Growth',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
-                  color: AppTheme.darkTextColor.withValues(alpha: 0.6),
-                ),
+                'Community & Growth'.toUpperCase(),
+                style: AppTheme.label(color: context.sw.textMuted),
               ),
             ),
             const SizedBox(height: 8),
@@ -1057,63 +1016,60 @@ class _SettingsTabView extends StatelessWidget {
               icon: Icons.insights,
               title: 'Progress Dashboard',
               subtitle: 'Track sessions, quizzes and peer ratings',
-              onTap: () => Navigator.pushNamed(context, '/progress'),
+              onTap: () => _closeThenNamed(context, '/progress'),
             ),
-            const SizedBox(height: 16),
             _buildSettingsButton(
               context,
               icon: Icons.forum,
               title: 'Community Forum',
               subtitle: 'Discuss and share with the community',
-              onTap: () => Navigator.pushNamed(context, '/forum'),
+              onTap: () => _closeThenNamed(context, '/forum'),
             ),
-            const SizedBox(height: 16),
             _buildSettingsButton(
               context,
               icon: Icons.verified_user,
               title: 'Profile Verification',
               subtitle: 'Verify your email and phone',
-              onTap: () => Navigator.pushNamed(context, '/verification'),
+              onTap: () => _closeThenNamed(context, '/verification'),
             ),
-            const SizedBox(height: 16),
             if (isAdmin) ...[
               _buildSettingsButton(
                 context,
                 icon: Icons.analytics,
                 title: 'Analytics Dashboard',
                 subtitle: 'Browse app activity events (admin only)',
-                onTap: () => Navigator.pushNamed(context, '/analytics'),
+                onTap: () => _closeThenNamed(context, '/analytics'),
               ),
-              const SizedBox(height: 16),
-            ],
+              ],
             if (isAdmin)
               _buildSettingsButton(
                 context,
                 icon: Icons.admin_panel_settings,
                 title: 'Admin Panel',
                 subtitle: 'Manage users and system settings',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const AdminPage())
-                  );
-                },
+                onTap: () => _closeThenPush(context, const AdminPage()),
               ),
-            const SizedBox(height: 16),
             _buildSettingsButton(
               context,
               icon: Icons.delete_forever,
               title: 'Delete Account',
               subtitle: 'Permanently remove your profile and data',
-              onTap: () => _deleteAccount(context),
+              danger: true,
+              onTap: () {
+                Navigator.of(context, rootNavigator: true).pop();
+                _deleteAccount(context);
+              },
             ),
-            const SizedBox(height: 16),
             _buildSettingsButton(
               context,
               icon: Icons.logout,
               title: 'Sign Out',
               subtitle: 'Log out of your account',
+              danger: true,
               onTap: () async {
+                // Close the sheet first - signing out swaps the whole widget
+                // tree underneath it, leaving an orphaned sheet on screen.
+                Navigator.of(context, rootNavigator: true).pop();
                 await FirebaseAuth.instance.signOut();
               },
             ),
@@ -1123,6 +1079,20 @@ class _SettingsTabView extends StatelessWidget {
     );
   }
   
+  /// Settings actions always dismiss the sheet before they navigate, so it
+  /// can't linger over the destination.
+  void _closeThenPush(BuildContext context, Widget page) {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    navigator.pop();
+    navigator.push(MaterialPageRoute(builder: (_) => page));
+  }
+
+  void _closeThenNamed(BuildContext context, String route) {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    navigator.pop();
+    navigator.pushNamed(route);
+  }
+
   /// Permanently deletes the account: removes the Firestore profile and signs
   /// out. Deleting the Firebase Auth record itself needs a recent login - if
   /// it fails we tell the user to re-authenticate and retry.
@@ -1192,17 +1162,59 @@ class _SettingsTabView extends StatelessWidget {
     required String title,
     required String subtitle,
     required VoidCallback onTap,
+    bool danger = false,
   }) {
-    return Card(
-      elevation: 1,
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ListTile(
-        leading: Icon(icon, color: Theme.of(context).primaryColor),
-        title: Text(title),
-        subtitle: Text(subtitle),
-        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+    final c = context.sw;
+    final accent = danger ? const Color(0xFFD64545) : c.get;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Pressable(
+        scale: 0.985,
         onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: c.surface,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, size: 19, color: accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.manrope(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        color: danger ? accent : c.text,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: c.textMuted),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1387,31 +1399,8 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
           ],
         ),
         const SizedBox(height: 16),
-        Text(
-          'Badges',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
-        ),
-        const SizedBox(height: 8),
-        gamification.badges.isEmpty
-            ? Text(
-                'No badges yet - complete a swap session to earn your first one!',
-                style: TextStyle(color: Colors.grey.shade600),
-              )
-            : Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: gamification.badges
-                    .map((b) => Chip(
-                          label: Text(b),
-                          backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.08),
-                          side: BorderSide(color: AppTheme.primaryColor.withValues(alpha: 0.3)),
-                        ))
-                    .toList(),
-              ),
+        const KitSection('Badges'),
+        BadgeCollection(earnedIds: gamification.badges),
       ],
     );
   }
@@ -1422,25 +1411,35 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
     required String label,
     required String value,
   }) {
-    return Container(
+    final c = context.sw;
+    return SurfaceCard(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.warmBorder),
-      ),
       child: Row(
         children: [
-          Icon(icon, color: AppTheme.primaryColor, size: 28),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: c.give.withValues(alpha: 0.13),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: Icon(icon, color: c.give, size: 20),
+          ),
           const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              Text(label,
-                  style: TextStyle(
-                      fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(value, style: AppTheme.display(fontSize: 22, color: c.text)),
+                ),
+                Text(label,
+                    style: GoogleFonts.manrope(
+                        fontSize: 11.5, fontWeight: FontWeight.w700, color: c.textMuted)),
+              ],
+            ),
           ),
         ],
       ),
@@ -1458,7 +1457,7 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
         if (docs.isEmpty) {
           return Text(
             'No swap sessions yet.',
-            style: TextStyle(color: Colors.grey.shade600),
+            style: TextStyle(color: context.sw.textMuted),
           );
         }
         return Column(
@@ -1472,7 +1471,7 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
             final skillOffered = data['skillOffered'] ?? '';
             return ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(_iconForSessionStatus(status), color: AppTheme.primaryColor),
+              leading: Icon(_iconForSessionStatus(status), color: context.sw.give),
               title: Text('$otherName - $skillOffered'),
               subtitle: Text(_labelForSessionStatus(status)),
               dense: true,
@@ -1524,7 +1523,7 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
         if (docs.isEmpty) {
           return Text(
             'No reviews yet.',
-            style: TextStyle(color: Colors.grey.shade600),
+            style: TextStyle(color: context.sw.textMuted),
           );
         }
         return Column(
@@ -1535,7 +1534,7 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
             final timestamp = data['timestamp'] as Timestamp?;
             return ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.star, color: AppTheme.primaryColor),
+              leading: Icon(Icons.star, color: context.sw.give),
               title: Text('${rating.toStringAsFixed(1)} stars'),
               subtitle: Text(review.isEmpty
                   ? (timestamp != null ? DateFormat.yMMMd().format(timestamp.toDate()) : '')
@@ -1560,7 +1559,7 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
         if (docs.isEmpty) {
           return Text(
             'No points earned yet - be the first!',
-            style: TextStyle(color: Colors.grey.shade600),
+            style: TextStyle(color: context.sw.textMuted),
           );
         }
         final uids = docs.map((d) => d.id).toList();
@@ -1583,7 +1582,7 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
                     leading: CircleAvatar(
                       radius: 16,
                       backgroundColor: i < 3
-                          ? AppTheme.primaryColor.withValues(alpha: 0.15)
+                          ? context.sw.give.withValues(alpha: 0.15)
                           : Theme.of(context).colorScheme.surfaceContainerHighest,
                       child: Text(
                         '#${i + 1}',
@@ -1591,7 +1590,7 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
                           color: i < 3
-                              ? AppTheme.primaryColor
+                              ? context.sw.give
                               : Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),

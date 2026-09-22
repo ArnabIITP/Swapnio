@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../theme.dart';
 import 'progress_provider.dart';
+import '../../ui/swapnio_kit.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class ProgressDashboard extends StatelessWidget {
   const ProgressDashboard({super.key});
@@ -27,25 +29,43 @@ class ProgressDashboard extends StatelessWidget {
               padding: const EdgeInsets.all(16.0),
               child: ListView(
                 children: [
-                  Text('Total Sessions: ${progress.totalSessions}', style: TextStyle(fontSize: 18)),
-                  Text('Total Messages: ${progress.totalMessages}', style: TextStyle(fontSize: 18)),
-                  Text('Total Tasks: ${progress.totalTasks}', style: TextStyle(fontSize: 18)),
-                  SizedBox(height: 24),
-                  Text('Skill Progress', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  ...progress.skills.map((s) => Card(
-                        margin: EdgeInsets.symmetric(vertical: 8),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: Column(
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _metric(context, '${progress.totalSessions}', 'sessions',
+                            context.sw.give),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _metric(context, '${progress.totalMessages}', 'messages',
+                            context.sw.get),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _metric(context, '${progress.totalTasks}', 'tasks',
+                            context.sw.success),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 22),
+                  const KitSection('Skill progress'),
+                  ...progress.skills.map((s) => SurfaceCard(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(s.skillName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                              SizedBox(height: 8),
-                              LinearProgressIndicator(
-                                value: (s.sessionsCompleted / 20).clamp(0.0, 1.0),
-                                minHeight: 8,
-                                backgroundColor: Colors.grey[300],
-                                color: Colors.blueAccent,
+                              Text(s.skillName,
+                                  style: AppTheme.display(
+                                      fontSize: 19, color: context.sw.text)),
+                              const SizedBox(height: 10),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(5),
+                                child: LinearProgressIndicator(
+                                  value: (s.sessionsCompleted / 20).clamp(0.0, 1.0),
+                                  minHeight: 9,
+                                  backgroundColor: context.sw.surfaceLow,
+                                  color: context.sw.give,
+                                ),
                               ),
                               SizedBox(height: 8),
                               Text('Sessions: ${s.sessionsCompleted}'),
@@ -54,7 +74,7 @@ class ProgressDashboard extends StatelessWidget {
                               Row(
                                 children: [
                                   Text('Peer Rating: '),
-                                  Icon(Icons.star, color: AppTheme.primaryColor, size: 18),
+                                  Icon(Icons.star, color: context.sw.give, size: 18),
                                   Text('${s.peerRating.toStringAsFixed(1)} / 5'),
                                 ],
                               ),
@@ -75,7 +95,6 @@ class ProgressDashboard extends StatelessWidget {
                                   ),
                                 ),
                             ],
-                          ),
                         ),
                       )),
                   if (progress.skills.isEmpty)
@@ -83,7 +102,7 @@ class ProgressDashboard extends StatelessWidget {
                       padding: const EdgeInsets.only(top: 12),
                       child: Text(
                         'Complete a swap session to start tracking progress.',
-                        style: TextStyle(color: Colors.grey[600]),
+                        style: TextStyle(color: context.sw.textMuted),
                       ),
                     ),
                 ],
@@ -91,6 +110,24 @@ class ProgressDashboard extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _metric(BuildContext context, String value, String label, Color color) {
+    return SurfaceCard(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+      child: Column(
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(value, style: AppTheme.display(fontSize: 24, color: color)),
+          ),
+          const SizedBox(height: 2),
+          Text(label,
+              style: GoogleFonts.manrope(
+                  fontSize: 11, fontWeight: FontWeight.w700, color: context.sw.textMuted)),
+        ],
       ),
     );
   }

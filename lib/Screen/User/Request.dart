@@ -4,13 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:shimmer/shimmer.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../providers/app_state.dart';
 import '../../services/swap_service.dart';
 import '../../theme.dart';
-import '../../ui/celebration.dart';
+import '../../ui/session_actions.dart';
+import '../../ui/swapnio_badges.dart';
+import '../../ui/swapnio_kit.dart';
+import '../../ui/swapnio_widgets.dart';
+import 'session_detail.dart';
 import 'chat_page.dart';
 
 class RequestPage extends StatefulWidget {
@@ -198,33 +200,59 @@ class _RequestPageState extends State<RequestPage>
 
   Widget _swipeBackground({
     required Color color,
+    required Color foreground,
     required IconData icon,
     required String label,
     required bool alignLeft,
   }) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 28),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(16),
-      ),
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 26),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(24)),
       alignment: alignLeft ? Alignment.centerLeft : Alignment.centerRight,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: Colors.white),
+          Icon(icon, color: foreground),
           const SizedBox(width: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          Text(label, style: GoogleFonts.manrope(color: foreground, fontWeight: FontWeight.w800)),
         ],
       ),
     );
+  }
+
+  /// A specific reason ("Teaches Figma, wants your Python") earns far more
+  /// accepts than a generic "wants to connect" - the specificity is what
+  /// makes the request feel credible.
+  String _matchReason(Map<String, dynamic> data) {
+    final me = Provider.of<AppState>(context, listen: false).currentUser;
+    List<String> list(dynamic v) => v is List
+        ? v.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList()
+        : (v is String && v.trim().isNotEmpty ? [v] : <String>[]);
+    final theyTeach = list(data['skillsOffered']);
+    final theyWant = list(data['skillsWanted']);
+    if (me == null) {
+      return theyTeach.isNotEmpty ? 'Teaches ${theyTeach.first}' : 'Liked your profile';
+    }
+    final myWant = me.skillsWanted.map((e) => e.toLowerCase()).toSet();
+    final myTeach = me.skillsOffered.map((e) => e.toLowerCase()).toSet();
+    final give = theyTeach.where((t) => myWant.contains(t.toLowerCase())).toList();
+    final get = theyWant.where((t) => myTeach.contains(t.toLowerCase())).toList();
+    if (give.isNotEmpty && get.isNotEmpty) return 'Teaches ${give.first}, wants your ${get.first}';
+    if (give.isNotEmpty) return 'Teaches ${give.first} - on your wishlist';
+    if (get.isNotEmpty) return 'Wants to learn your ${get.first}';
+    if (theyTeach.isNotEmpty) return 'Teaches ${theyTeach.first}';
+    return 'Liked your profile';
+  }
+
+  String _shortAgo(Timestamp? ts) {
+    if (ts == null) return '';
+    final d = DateTime.now().difference(ts.toDate());
+    if (d.inMinutes < 1) return 'now';
+    if (d.inMinutes < 60) return '${d.inMinutes}m';
+    if (d.inHours < 24) return '${d.inHours}h';
+    if (d.inDays < 7) return '${d.inDays}d';
+    return DateFormat.MMMd().format(ts.toDate());
   }
 
   String _getChatRoomId(String userId1, String userId2) {
@@ -236,113 +264,84 @@ class _RequestPageState extends State<RequestPage>
 
   @override
   Widget build(BuildContext context) {
+    final c = context.sw;
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        title: Text(
-          "My Connections",
-          style: GoogleFonts.ebGaramond(
-            fontWeight: FontWeight.w800,
-            color: AppTheme.darkTextColor,
-            fontSize: 24,
-            letterSpacing: 0,
-          ),
-        ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(54),
-          child: Container(
-            color: Theme.of(context).scaffoldBackgroundColor,
-            child: TabBar(
-              controller: _tabController,
-              labelColor: AppTheme.primaryColor,
-              unselectedLabelColor: Colors.grey,
-              indicator: const UnderlineTabIndicator(
-                borderSide: BorderSide(
-                  width: 4.0,
-                  color: AppTheme.primaryColor,
-                ),
-                insets: EdgeInsets.symmetric(horizontal: 32.0),
+      backgroundColor: c.bg,
+      body: SafeArea(
+        bottom: false,
+        child: currentUserId.isEmpty
+            ? const Center(child: Text('Please log in to view requests and chats.'))
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                    child: Text('Inbox', style: AppTheme.display(fontSize: 34, color: c.text)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+                    child: StreamBuilder<QuerySnapshot>(
+                      stream: _requestsStream,
+                      builder: (context, snap) {
+                        final n = (snap.data?.docs ?? const [])
+                            .where((d) => !_hiddenRequestIds.contains(d.id))
+                            .length;
+                        return Text(
+                          n == 0
+                              ? 'Requests, chats and sessions in one place'
+                              : '$n ${n == 1 ? 'person wants' : 'people want'} to swap with you',
+                          style: GoogleFonts.manrope(fontSize: 13, color: c.textMuted),
+                        );
+                      },
+                    ),
+                  ),
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 20),
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: c.surfaceLow,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: TabBar(
+                      controller: _tabController,
+                      indicator: BoxDecoration(
+                        color: c.cta,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      indicatorSize: TabBarIndicatorSize.tab,
+                      dividerHeight: 0,
+                      labelColor: c.onCta,
+                      unselectedLabelColor: c.textMuted,
+                      labelStyle: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 13.5),
+                      unselectedLabelStyle:
+                          GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13.5),
+                      splashBorderRadius: BorderRadius.circular(12),
+                      tabs: const [
+                        Tab(height: 40, text: 'Requests'),
+                        Tab(height: 40, text: 'Chats'),
+                        Tab(height: 40, text: 'Sessions'),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildRequestsTab(),
+                        _buildChatsTab(),
+                        _buildSessionsTab(),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              labelStyle: GoogleFonts.manrope(
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-              ),
-              tabs: const [
-                Tab(text: "REQUESTS"),
-                Tab(text: "CHATS"),
-                Tab(text: "SESSIONS"),
-              ],
-            ),
-          ),
-        ),
-      ),
-      body: currentUserId.isEmpty
-          ? const Center(
-              child: Text("Please log in to view requests and chats."),
-            )
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                _buildRequestsTab(),
-                _buildChatsTab(),
-                _buildSessionsTab(),
-              ],
-            ),
-    );
-  }
-
-  /// Opens date+time pickers and reschedules an accepted session, notifying
-  /// the partner via a notification document.
-  Future<void> _rescheduleSession(
-    String swapId,
-    Map<String, dynamic> data,
-  ) async {
-    final current = data['scheduledFor'] as Timestamp?;
-    final initial =
-        current?.toDate() ?? DateTime.now().add(const Duration(days: 1));
-
-    final date = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (date == null || !mounted) return;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(initial),
-    );
-    if (time == null || !mounted) return;
-
-    final newTime = DateTime(
-      date.year,
-      date.month,
-      date.day,
-      time.hour,
-      time.minute,
-    );
-    final messenger = ScaffoldMessenger.of(context);
-    final myName =
-        FirebaseAuth.instance.currentUser?.displayName ?? 'Swapnio user';
-    final ok = await SwapSessionService.instance.rescheduleSession(
-      swapId: swapId,
-      swapData: data,
-      myName: myName,
-      newTime: newTime,
-    );
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          ok
-              ? 'Session rescheduled to ${DateFormat.yMMMd().add_jm().format(newTime)}'
-              : 'Could not reschedule the session. Please try again.',
-        ),
-        backgroundColor: ok ? AppTheme.primaryColor : Colors.redAccent,
       ),
     );
   }
+
+  Future<void> _rescheduleSession(String swapId, Map<String, dynamic> data) =>
+      rescheduleSessionFlow(context, swapId, data);
 
   Widget _buildSessionActions(
     String swapId,
@@ -355,12 +354,12 @@ class _RequestPageState extends State<RequestPage>
       if (isMine) {
         return Row(
           children: [
-            Icon(Icons.hourglass_empty, size: 16, color: Colors.grey.shade600),
+            Icon(Icons.hourglass_empty, size: 16, color: context.sw.textMuted),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 'Waiting for them to accept',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                style: TextStyle(fontSize: 13, color: context.sw.textMuted),
               ),
             ),
             TextButton(
@@ -425,7 +424,7 @@ class _RequestPageState extends State<RequestPage>
                 child: TextButton.icon(
                   onPressed: () => _confirmNoShow(swapId),
                   style: TextButton.styleFrom(
-                    foregroundColor: Colors.grey.shade700,
+                    foregroundColor: context.sw.textMuted,
                   ),
                   icon: const Icon(Icons.event_busy, size: 18),
                   label: const Text("Didn't happen"),
@@ -440,12 +439,12 @@ class _RequestPageState extends State<RequestPage>
     if (status == 'completed') {
       return Row(
         children: [
-          Icon(Icons.verified, size: 16, color: AppTheme.tertiaryColor),
+          Icon(Icons.verified, size: 16, color: context.sw.get),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               'Swap finished - open the chat to leave a rating',
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              style: TextStyle(fontSize: 13, color: context.sw.textMuted),
             ),
           ),
         ],
@@ -455,12 +454,12 @@ class _RequestPageState extends State<RequestPage>
     if (status == 'no_show') {
       return Row(
         children: [
-          Icon(Icons.event_busy, size: 16, color: Colors.grey.shade600),
+          Icon(Icons.event_busy, size: 16, color: context.sw.textMuted),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               'Marked as a no-show - no points or rating for this session',
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              style: TextStyle(fontSize: 13, color: context.sw.textMuted),
             ),
           ),
         ],
@@ -470,149 +469,10 @@ class _RequestPageState extends State<RequestPage>
     return const SizedBox.shrink();
   }
 
-  /// Completing a session captures what actually happened, not just a status
-  /// flip - notes and whether the learning goal was met are what turn a
-  /// "match" into a provable outcome.
-  Future<void> _completeSessionWithOutcome(
-    String swapId,
-    List<String> participants,
-  ) async {
-    final notesController = TextEditingController();
-    bool goalAchieved = true;
+  Future<void> _completeSessionWithOutcome(String swapId, List<String> participants) =>
+      completeSessionFlow(context, swapId, participants, onRate: () => _tabController.animateTo(1));
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('How did it go?'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: notesController,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Session notes (optional)',
-                  hintText: 'What did you cover? What is next?',
-                ),
-              ),
-              const SizedBox(height: 12),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                value: goalAchieved,
-                onChanged: (value) =>
-                    setDialogState(() => goalAchieved = value ?? true),
-                title: const Text('We covered what we planned'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Complete'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    final messenger = ScaffoldMessenger.of(context);
-    final ok = await SwapSessionService.instance.completeSession(
-      swapId,
-      participants,
-      sessionNotes: notesController.text.trim(),
-      goalAchieved: goalAchieved,
-    );
-
-    if (!ok) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Could not complete the session. Please try again.'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
-      return;
-    }
-
-    // Finishing a session is the end of the core value loop - it should feel
-    // like an achievement, not like filing paperwork.
-    if (!mounted) return;
-    final completedCount = await _completedSessionCount();
-    if (!mounted) return;
-    await showCelebrationDialog(
-      context,
-      icon: Icons.workspace_premium,
-      headline: completedCount <= 1
-          ? 'Your first swap is done!'
-          : 'Swap #$completedCount complete!',
-      message:
-          'You both earned points. Leave a rating while it is fresh - '
-          'it is what makes reputation here mean something.',
-      extra: const AnimatedPointsBadge(points: 25),
-      primaryLabel: 'Rate this swap',
-      onPrimary: () => _tabController.animateTo(1),
-      secondaryLabel: 'Later',
-    );
-  }
-
-  Future<int> _completedSessionCount() async {
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('swaps')
-          .where('participants', arrayContains: currentUserId)
-          .where('status', isEqualTo: 'completed')
-          .get();
-      return snapshot.docs.length;
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  Future<void> _confirmNoShow(String swapId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text("Didn't happen?"),
-        content: const Text(
-          'This marks the session as a no-show. No points are awarded and '
-          "it won't unlock a rating for either of you.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.grey.shade700,
-            ),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Mark as no-show'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    final ok = await SwapSessionService.instance.markNoShow(swapId);
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          ok
-              ? 'Session marked as a no-show.'
-              : 'Could not update the session. Please try again.',
-        ),
-        backgroundColor: ok ? Colors.grey.shade700 : Colors.redAccent,
-      ),
-    );
-  }
+  Future<void> _confirmNoShow(String swapId) => confirmNoShowFlow(context, swapId);
 
   Widget _buildSessionsTab() {
     return StreamBuilder<QuerySnapshot>(
@@ -625,7 +485,7 @@ class _RequestPageState extends State<RequestPage>
         final docs = snapshot.data?.docs ?? [];
         if (docs.isEmpty) {
           return _buildEmptyState(
-            icon: Icons.event_available,
+            icon: Icons.event_available_rounded,
             title: 'No swap sessions yet',
             message:
                 'Open a chat and tap "Propose swap session" to schedule your '
@@ -635,7 +495,7 @@ class _RequestPageState extends State<RequestPage>
           );
         }
         return ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.fromLTRB(0, 10, 0, 16),
           itemCount: docs.length,
           itemBuilder: (context, index) =>
               _buildSessionCard(docs[index].id, docs[index].data()),
@@ -645,260 +505,185 @@ class _RequestPageState extends State<RequestPage>
   }
 
   Widget _buildSessionCard(String swapId, dynamic rawData) {
+    final c = context.sw;
     final data = rawData as Map<String, dynamic>;
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final participants = List<String>.from(data['participants'] ?? []);
     final otherId = participants.firstWhere((p) => p != uid, orElse: () => '');
     final names = Map<String, dynamic>.from(data['participantNames'] ?? {});
     final otherName = (names[otherId] as String?) ?? 'Your swap partner';
-    final offered = data['skillOffered'] ?? '';
-    final wanted = data['skillWanted'] ?? '';
-    final status = data['status'] ?? 'pending';
-    final createdBy = data['createdBy'] ?? '';
-    final scheduledFor = data['scheduledFor'] as Timestamp?;
-    final scheduledText = scheduledFor != null
-        ? DateFormat.yMMMd().add_jm().format(scheduledFor.toDate())
-        : 'Time to be agreed';
-    final isMine = createdBy == uid;
+    final sides = swapSidesFor(data, uid);
+    final status = (data['status'] ?? 'pending').toString();
+    final isMine = data['createdBy'] == uid;
+    final scheduledFor = (data['scheduledFor'] as Timestamp?)?.toDate();
 
-    Color statusColor;
-    String statusLabel;
+    late final Color statusColor;
+    late final String statusLabel;
     switch (status) {
       case 'accepted':
-        statusColor = AppTheme.primaryColor;
+        statusColor = c.success;
         statusLabel = 'Accepted';
         break;
       case 'completed':
-        statusColor = AppTheme.tertiaryColor;
+        statusColor = c.get;
         statusLabel = 'Completed';
         break;
       case 'declined':
-        statusColor = Colors.grey;
+        statusColor = c.textMuted;
         statusLabel = 'Declined';
         break;
       case 'no_show':
-        statusColor = Colors.grey.shade700;
+        statusColor = c.textMuted;
         statusLabel = 'No-show';
         break;
       default:
-        statusColor = Colors.orange.shade700;
+        statusColor = c.give;
         statusLabel = 'Pending';
     }
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.warmBorder),
-        boxShadow: AppTheme.softShadow,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    String whenText;
+    if (scheduledFor == null) {
+      whenText = 'Time to be agreed';
+    } else {
+      final diff = scheduledFor.difference(DateTime.now());
+      if (!diff.isNegative && diff.inHours < 24) {
+        whenText = diff.inMinutes < 60
+            ? 'In ${diff.inMinutes} min'
+            : 'In ${diff.inHours}h · ${DateFormat.jm().format(scheduledFor)}';
+      } else {
+        whenText = DateFormat.MMMEd().add_jm().format(scheduledFor);
+      }
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      child: Pressable(
+        scale: 0.985,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => SessionDetailPage(swapId: swapId)),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(24)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  otherName,
-                  style: GoogleFonts.ebGaramond(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.darkTextColor,
+              Row(
+                children: [
+                  SwapAvatar(name: otherName, size: 40, radius: 14),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(otherName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.manrope(
+                            fontSize: 15.5, fontWeight: FontWeight.w800, color: c.text)),
                   ),
-                ),
+                  TintTag(statusLabel, color: statusColor),
+                ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: statusColor.withValues(alpha: 0.4)),
-                ),
-                child: Text(
-                  statusLabel,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: statusColor,
+              const SizedBox(height: 14),
+              SwapSplit(giveSkill: sides.myGive, getSkill: sides.myGet),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Icon(Icons.schedule_rounded, size: 15, color: c.textMuted),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(whenText,
+                        style: GoogleFonts.manrope(
+                            fontSize: 12.5, fontWeight: FontWeight.w700, color: c.text)),
                   ),
-                ),
+                  Text('Details',
+                      style: GoogleFonts.manrope(
+                          fontSize: 12, fontWeight: FontWeight.w800, color: c.get)),
+                  Icon(Icons.chevron_right_rounded, size: 18, color: c.get),
+                ],
               ),
+              if ((data['sessionNotes'] as String? ?? '').trim().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(data['sessionNotes'] as String,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.manrope(
+                        fontSize: 12.5, fontStyle: FontStyle.italic, color: c.textMuted)),
+              ],
+              const SizedBox(height: 12),
+              _buildSessionActions(swapId, status, isMine, participants, rawData: data),
             ],
           ),
-          const SizedBox(height: 10),
-          _buildSkillItem('Teaches', offered, Icons.auto_fix_high),
-          const SizedBox(height: 6),
-          _buildSkillItem('Learns', wanted, Icons.search),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              const Icon(Icons.event, size: 16, color: AppTheme.tertiaryColor),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  scheduledText,
-                  style: GoogleFonts.manrope(
-                    fontSize: 13,
-                    color: AppTheme.darkTextColor,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if ((data['agenda'] as String? ?? '').isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(
-                  Icons.list_alt,
-                  size: 16,
-                  color: AppTheme.tertiaryColor,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    data['agenda'] as String,
-                    style: GoogleFonts.manrope(
-                      fontSize: 13,
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.onSurface.withValues(alpha: 0.8),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if ((data['sessionNotes'] as String? ?? '').isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(
-                  Icons.sticky_note_2_outlined,
-                  size: 16,
-                  color: AppTheme.primaryColor,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    data['sessionNotes'] as String,
-                    style: GoogleFonts.manrope(
-                      fontSize: 13,
-                      fontStyle: FontStyle.italic,
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.onSurface.withValues(alpha: 0.75),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if ((data['meetingLink'] as String? ?? '').isNotEmpty &&
-              (status == 'accepted' || status == 'pending')) ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () =>
-                    _openMeetingLink(data['meetingLink'] as String),
-                icon: const Icon(Icons.videocam, size: 18),
-                label: const Text('Join session'),
-              ),
-            ),
-          ],
-          const SizedBox(height: 14),
-          _buildSessionActions(
-            swapId,
-            status,
-            isMine,
-            participants,
-            rawData: data,
-          ),
-        ],
+        ),
       ),
     );
-  }
-
-  /// Copies the meeting link to the clipboard. The app deliberately doesn't
-  /// bundle a video SDK - organisers paste their own Meet/Zoom/Jitsi link.
-  Future<void> _openMeetingLink(String link) async {
-    await Clipboard.setData(ClipboardData(text: link));
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Meeting link copied: $link')));
   }
 
   Widget _buildRequestsTab() {
     return StreamBuilder<QuerySnapshot>(
       stream: _requestsStream,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           return _buildLoadingShimmer();
         }
-
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.person_add_disabled,
-            title: "No requests yet",
-            message:
-                "Requests show up here when someone likes you. Liking people "
-                "first is the fastest way to get there.",
-            actionLabel: 'Start discovering',
-            onAction: () => widget.onNavigateToTab?.call(1),
-          );
-        }
-
-        final requests = snapshot.data!.docs
+        final requests = (snapshot.data?.docs ?? const [])
             .where((d) => !_hiddenRequestIds.contains(d.id))
             .toList();
         if (requests.isEmpty) {
           return _buildEmptyState(
-            icon: Icons.person_add_disabled,
-            title: "No requests yet",
-            message:
-                "Requests show up here when someone likes you. Liking people "
-                "first is the fastest way to get there.",
+            icon: Icons.favorite_border_rounded,
+            useSwapMotif: true,
+            title: 'No requests yet',
+            message: 'Requests show up here when someone likes you. Liking people '
+                'first is the fastest way to get there.',
             actionLabel: 'Start discovering',
             onAction: () => widget.onNavigateToTab?.call(1),
           );
         }
-
+        final c = context.sw;
         return ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          itemCount: requests.length,
+          padding: const EdgeInsets.fromLTRB(0, 10, 0, 16),
+          itemCount: requests.length + 1,
           itemBuilder: (context, index) {
-            final data = requests[index].data() as Map<String, dynamic>;
-            final docId = requests[index].id;
+            if (index == 0) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 6),
+                child: Row(
+                  children: [
+                    Icon(Icons.west_rounded, size: 14, color: c.textMuted),
+                    const SizedBox(width: 4),
+                    Text('Swipe to decline',
+                        style: GoogleFonts.manrope(
+                            fontSize: 11.5, fontWeight: FontWeight.w800, color: c.textMuted)),
+                    const Spacer(),
+                    Text('Swipe to accept',
+                        style: GoogleFonts.manrope(
+                            fontSize: 11.5, fontWeight: FontWeight.w800, color: c.give)),
+                    const SizedBox(width: 4),
+                    Icon(Icons.east_rounded, size: 14, color: c.give),
+                  ],
+                ),
+              );
+            }
+            final doc = requests[index - 1];
+            final data = doc.data() as Map<String, dynamic>;
+            final docId = doc.id;
 
-            final timestamp = data['timestamp'] as Timestamp?;
-            final formattedDate = timestamp != null
-                ? DateFormat.yMMMd().add_jm().format(timestamp.toDate())
-                : 'Recently';
-
-            // Swipe right to accept, left to decline - far quicker than
-            // reaching for the buttons. The item is hidden synchronously in
-            // onDismissed so it's never still in the tree after dismissal.
+            // Swipe right to accept, left to decline. The item is hidden
+            // synchronously in onDismissed so it is never still in the tree
+            // after dismissal.
             return Dismissible(
               key: ValueKey('request_$docId'),
               background: _swipeBackground(
-                color: AppTheme.primaryColor,
-                icon: Icons.check,
+                color: c.win,
+                foreground: c.onWin,
+                icon: Icons.check_rounded,
                 label: 'Accept',
                 alignLeft: true,
               ),
               secondaryBackground: _swipeBackground(
-                color: AppTheme.tertiaryColor,
-                icon: Icons.close,
+                color: c.surfaceLow,
+                foreground: c.textMuted,
+                icon: Icons.close_rounded,
                 label: 'Decline',
                 alignLeft: false,
               ),
@@ -910,159 +695,82 @@ class _RequestPageState extends State<RequestPage>
                   _rejectRequest(docId);
                 }
               },
-              child: Container(
-                margin: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.warmBorder, width: 1),
-                  boxShadow: AppTheme.softShadow,
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          CachedNetworkImage(
-                            imageUrl: data["fromPhoto"] ?? "",
-                            imageBuilder: (context, imageProvider) =>
-                                CircleAvatar(
-                                  radius: 32,
-                                  backgroundImage: imageProvider,
-                                ),
-                            placeholder: (context, url) => CircleAvatar(
-                              radius: 32,
-                              backgroundColor: Colors.grey[300],
-                              child: const Icon(
-                                Icons.person,
-                                size: 32,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            errorWidget: (context, url, error) => CircleAvatar(
-                              radius: 32,
-                              backgroundColor: Colors.grey[300],
-                              child: const Icon(
-                                Icons.person,
-                                size: 32,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 18),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  data["fromName"] ?? "User",
-                                  style: GoogleFonts.ebGaramond(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppTheme.darkTextColor,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  formattedDate,
-                                  style: GoogleFonts.manrope(
-                                    color: AppTheme.darkTextColor.withValues(
-                                      alpha: 0.7,
-                                    ),
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Divider(height: 1, color: Colors.grey[200]),
-                      const SizedBox(height: 14),
-                      _buildSkillItem(
-                        "Offers",
-                        data["skillsOffered"],
-                        Icons.auto_fix_high,
-                      ),
-                      const SizedBox(height: 8),
-                      _buildSkillItem(
-                        "Wants",
-                        data["skillsWanted"],
-                        Icons.search,
-                      ),
-                      const SizedBox(height: 8),
-                      _buildSkillItem(
-                        "Available",
-                        data["availability"],
-                        Icons.access_time,
-                      ),
-                      const SizedBox(height: 18),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: () => _rejectRequest(docId),
-                            icon: const Icon(
-                              Icons.close,
-                              color: AppTheme.tertiaryColor,
-                            ),
-                            label: const Text(
-                              'Decline',
-                              style: TextStyle(
-                                color: AppTheme.tertiaryColor,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(
-                                color: AppTheme.tertiaryColor,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 18,
-                                vertical: 10,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          ElevatedButton.icon(
-                            onPressed: () => _acceptFromSwipe(docId, data),
-                            icon: const Icon(Icons.check),
-                            label: const Text(
-                              'Accept',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppTheme.primaryColor,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 22,
-                                vertical: 12,
-                              ),
-                              elevation: 0,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              child: _requestCard(docId, data),
             );
           },
         );
       },
+    );
+  }
+
+  Widget _requestCard(String docId, Map<String, dynamic> data) {
+    final c = context.sw;
+    final rawName = (data['fromName'] as String?)?.trim() ?? '';
+    final name = rawName.isEmpty ? 'Swapnio user' : rawName;
+    final availability = (data['availability'] ?? '').toString().trim();
+    Widget button(String label, Color bg, Color fg, VoidCallback onTap) => Expanded(
+          child: Pressable(
+            onTap: onTap,
+            child: Container(
+              height: 46,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
+              child: Text(label,
+                  style: GoogleFonts.manrope(
+                      fontSize: 14, fontWeight: FontWeight.w800, color: fg)),
+            ),
+          ),
+        );
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(24)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SwapAvatar(name: name, photoUrl: data['fromPhoto'] as String?, size: 48, radius: 16),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.manrope(
+                            fontSize: 15.5, fontWeight: FontWeight.w800, color: c.text)),
+                    const SizedBox(height: 6),
+                    TintTag(_matchReason(data), color: c.get, icon: Icons.bolt_rounded),
+                    if (availability.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text('Free: $availability',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted)),
+                    ],
+                  ],
+                ),
+              ),
+              Text(_shortAgo(data['timestamp'] as Timestamp?),
+                  style: GoogleFonts.manrope(fontSize: 11.5, color: c.textMuted)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              button('Decline', c.surfaceLow, c.textMuted, () => _rejectRequest(docId)),
+              const SizedBox(width: 10),
+              button('Accept', c.cta, c.onCta, () {
+                setState(() => _hiddenRequestIds.add(docId));
+                _acceptFromSwipe(docId, data);
+              }),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1070,165 +778,123 @@ class _RequestPageState extends State<RequestPage>
     return StreamBuilder<QuerySnapshot>(
       stream: _chatsStream,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           return _buildLoadingShimmer();
         }
-
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+        final chatRooms = snapshot.data?.docs ?? const [];
+        if (chatRooms.isEmpty) {
           return _buildEmptyState(
-            icon: Icons.chat_bubble_outline,
-            title: "No chats yet",
-            message:
-                "Chats open up once you and someone else both say yes. "
-                "Find someone whose skills match yours.",
+            icon: Icons.chat_bubble_outline_rounded,
+            useSwapMotif: true,
+            title: 'No chats yet',
+            message: 'Chats open up once you and someone else both say yes. '
+                'Find someone whose skills match yours.',
             actionLabel: 'Start discovering',
             onAction: () => widget.onNavigateToTab?.call(1),
           );
         }
-
-        final chatRooms = snapshot.data!.docs;
-
+        final c = context.sw;
         return ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.fromLTRB(0, 10, 0, 16),
           itemCount: chatRooms.length,
           itemBuilder: (context, index) {
             final data = chatRooms[index].data() as Map<String, dynamic>;
             final chatRoomId = chatRooms[index].id;
-
-            // Find the other user ID
             final users = List<String>.from(data['users'] ?? []);
-            final otherUserId = users.firstWhere(
-              (id) => id != currentUserId,
-              orElse: () => "",
-            );
-
+            final otherUserId = users.firstWhere((id) => id != currentUserId, orElse: () => '');
             if (otherUserId.isEmpty) return const SizedBox.shrink();
 
             final userNames = data['userNames'] as Map<String, dynamic>?;
             final userPhotos = data['userPhotos'] as Map<String, dynamic>?;
-
-            final otherUserName = userNames?[otherUserId] ?? "User";
-            final otherUserPhoto = userPhotos?[otherUserId] ?? "";
-
-            final lastMessage =
-                data['lastMessage'] as String? ?? "No messages yet";
+            final otherUserName = (userNames?[otherUserId] ?? 'User').toString();
+            final otherUserPhoto = (userPhotos?[otherUserId] ?? '').toString();
+            final lastMessage = (data['lastMessage'] as String?) ?? 'No messages yet';
             final lastMessageTime = data['lastMessageTime'] as Timestamp?;
-            final formattedTime = lastMessageTime != null
-                ? _formatLastMessageTime(lastMessageTime.toDate())
-                : "";
-
             final unreadCount =
-                (data['unreadCount']
-                    as Map<String, dynamic>?)?[currentUserId] ??
-                0;
+                ((data['unreadCount'] as Map<String, dynamic>?)?[currentUserId] as num?)?.toInt() ??
+                    0;
+            final unread = unreadCount > 0;
 
-            return Container(
-              margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.warmBorder, width: 1),
-                boxShadow: AppTheme.softShadow,
-              ),
-              child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 12,
-                ),
-                leading: CachedNetworkImage(
-                  imageUrl: otherUserPhoto,
-                  imageBuilder: (context, imageProvider) =>
-                      CircleAvatar(radius: 26, backgroundImage: imageProvider),
-                  placeholder: (context, url) => CircleAvatar(
-                    radius: 26,
-                    backgroundColor: Colors.grey[300],
-                    child: const Icon(Icons.person, color: Colors.grey),
-                  ),
-                  errorWidget: (context, url, error) => CircleAvatar(
-                    radius: 26,
-                    backgroundColor: Colors.grey[300],
-                    child: const Icon(Icons.person, color: Colors.grey),
-                  ),
-                ),
-                title: Text(
-                  otherUserName,
-                  style: GoogleFonts.ebGaramond(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 20,
-                    color: AppTheme.darkTextColor,
-                  ),
-                ),
-                subtitle: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        lastMessage,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.manrope(
-                          color: unreadCount > 0
-                              ? AppTheme.primaryColor
-                              : AppTheme.darkTextColor.withValues(alpha: 0.7),
-                          fontWeight: unreadCount > 0
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                          fontSize: 14,
-                        ),
-                      ),
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+              child: Pressable(
+                scale: 0.98,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatPage(
+                      chatRoomId: chatRoomId,
+                      otherUserName: otherUserName,
+                      otherUserPhoto: otherUserPhoto,
+                      otherUserId: otherUserId,
                     ),
-                    if (formattedTime.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8.0),
-                        child: Text(
-                          formattedTime,
-                          style: GoogleFonts.manrope(
-                            fontSize: 12,
-                            color: AppTheme.darkTextColor.withValues(
-                              alpha: 0.5,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
+                  ),
                 ),
-                trailing: unreadCount > 0
-                    ? Container(
-                        padding: const EdgeInsets.all(7),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryColor,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.08),
-                              blurRadius: 2,
-                              offset: const Offset(0, 1),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration:
+                      BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(20)),
+                  child: Row(
+                    children: [
+                      SwapAvatar(
+                          name: otherUserName, photoUrl: otherUserPhoto, size: 50, radius: 17),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(otherUserName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.manrope(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w800,
+                                          color: c.text)),
+                                ),
+                                Text(_shortAgo(lastMessageTime),
+                                    style: GoogleFonts.manrope(
+                                        fontSize: 11.5,
+                                        fontWeight: unread ? FontWeight.w800 : FontWeight.w500,
+                                        color: unread ? c.give : c.textMuted)),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(lastMessage,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.manrope(
+                                          fontSize: 13,
+                                          fontWeight: unread ? FontWeight.w700 : FontWeight.w500,
+                                          color: unread ? c.text : c.textMuted)),
+                                ),
+                                if (unread) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding:
+                                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                        color: c.give, borderRadius: BorderRadius.circular(10)),
+                                    child: Text(unreadCount > 99 ? '99+' : '$unreadCount',
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ],
                             ),
                           ],
                         ),
-                        child: Text(
-                          unreadCount.toString(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      )
-                    : null,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ChatPage(
-                        chatRoomId: chatRoomId,
-                        otherUserName: otherUserName,
-                        otherUserPhoto: otherUserPhoto,
-                        otherUserId: otherUserId,
                       ),
-                    ),
-                  );
-                },
+                    ],
+                  ),
+                ),
               ),
             );
           },
@@ -1237,55 +903,7 @@ class _RequestPageState extends State<RequestPage>
     );
   }
 
-  Widget _buildLoadingShimmer() {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Shimmer.fromColors(
-        baseColor: Colors.grey[300]!,
-        highlightColor: Colors.grey[100]!,
-        child: ListView.builder(
-          itemCount: 5,
-          itemBuilder: (_, __) => Padding(
-            padding: const EdgeInsets.only(bottom: 16.0),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 60,
-                  height: 60,
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: double.infinity,
-                        height: 16,
-                        color: Colors.white,
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        height: 12,
-                        color: Colors.white,
-                      ),
-                      const SizedBox(height: 8),
-                      Container(width: 100, height: 12, color: Colors.white),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _buildLoadingShimmer() => const ListSkeleton();
 
   /// Empty states name the next action rather than dead-ending on
   /// "nothing here yet" - an empty screen with no way forward is where
@@ -1296,40 +914,41 @@ class _RequestPageState extends State<RequestPage>
     required String message,
     String? actionLabel,
     VoidCallback? onAction,
+    bool useSwapMotif = false,
   }) {
+    final c = context.sw;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 80, color: AppTheme.warmBorder),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: GoogleFonts.ebGaramond(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.primaryColor,
-              ),
-            ),
+            if (useSwapMotif)
+              const SwapMotif(width: 176)
+            else
+              HexTile(icon: icon, size: 92),
+            const SizedBox(height: 22),
+            Text(title,
+                textAlign: TextAlign.center,
+                style: AppTheme.display(fontSize: 22, color: c.text)),
             const SizedBox(height: 8),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: GoogleFonts.manrope(
-                color: AppTheme.darkTextColor.withValues(alpha: 0.7),
-              ),
+              style: GoogleFonts.manrope(fontSize: 13.5, color: c.textMuted, height: 1.45),
             ),
             if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: () {
-                  HapticFeedback.selectionClick();
-                  onAction();
-                },
-                icon: const Icon(Icons.explore, size: 18),
-                label: Text(actionLabel),
+              const SizedBox(height: 22),
+              Pressable(
+                onTap: onAction,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 15),
+                  decoration:
+                      BoxDecoration(color: c.cta, borderRadius: BorderRadius.circular(16)),
+                  child: Text(actionLabel,
+                      style: GoogleFonts.manrope(
+                          fontSize: 14, fontWeight: FontWeight.w800, color: c.onCta)),
+                ),
               ),
             ],
           ],
@@ -1338,54 +957,4 @@ class _RequestPageState extends State<RequestPage>
     );
   }
 
-  Widget _buildSkillItem(String label, dynamic value, IconData icon) {
-    final displayValue = value is List ? value.join(', ') : value.toString();
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: AppTheme.primaryColor),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "$label:",
-                style: GoogleFonts.manrope(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  color: AppTheme.primaryColor,
-                ),
-              ),
-              Text(
-                displayValue,
-                style: GoogleFonts.manrope(
-                  fontSize: 14,
-                  color: AppTheme.darkTextColor,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _formatLastMessageTime(DateTime dateTime) {
-    final now = DateTime.now();
-    final difference = now.difference(dateTime);
-
-    if (difference.inSeconds < 60) {
-      return 'just now';
-    } else if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
-    } else if (difference.inDays < 7) {
-      return '${difference.inDays}d ago';
-    } else {
-      return DateFormat.yMMMd().format(dateTime);
-    }
-  }
 }
