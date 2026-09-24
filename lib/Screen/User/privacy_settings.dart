@@ -210,9 +210,9 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
               ],
             ),
             const SizedBox(height: 10),
-            const Text(
+            Text(
               'Control what information you share with other users and how your data is used in Swapnio.',
-              style: TextStyle(fontSize: 15, color: Color(0xFF555555)),
+              style: TextStyle(fontSize: 15, color: context.sw.textMuted),
             ),
           ],
         ),
@@ -353,15 +353,15 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
                   style: TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF2D2D2D),
+                    color: context.sw.text,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
-            const Text(
+            Text(
               'Choose between the light and dark Sahara themes.',
-              style: TextStyle(fontSize: 15, color: Color(0xFF555555)),
+              style: TextStyle(fontSize: 15, color: context.sw.textMuted),
             ),
             const SizedBox(height: 12),
             Wrap(

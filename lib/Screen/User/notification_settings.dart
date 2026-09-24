@@ -193,9 +193,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
               ],
             ),
             const SizedBox(height: 10),
-            const Text(
+            Text(
               'Control which notifications you receive from Swapnio. You can toggle each type of notification on or off.',
-              style: TextStyle(fontSize: 15, color: Color(0xFF555555)),
+              style: TextStyle(fontSize: 15, color: context.sw.textMuted),
             ),
           ],
         ),

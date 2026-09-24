@@ -350,12 +350,16 @@ class _ChatPageState extends State<ChatPage> {
               radius: 14,
             ),
             const SizedBox(width: 12),
-            Text(
-              widget.otherUserName,
-              style: GoogleFonts.manrope(
-                color: context.sw.text,
-                fontWeight: FontWeight.w800,
-                fontSize: 17,
+            Expanded(
+              child: Text(
+                widget.otherUserName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.manrope(
+                  color: context.sw.text,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 17,
+                ),
               ),
             ),
           ],

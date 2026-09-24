@@ -31,6 +31,12 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    // The add-skill FAB only makes sense on the Skills tab - shown on every
+    // tab it sat permanently over the Users list, covering each row's
+    // ban/delete buttons as you scrolled.
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) setState(() {});
+    });
     _setupRealtimeUpdates();
     _fetchAdminStats();
     _loadSkills();
@@ -324,15 +330,17 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: colorScheme.primary,
-        foregroundColor: Colors.white,
-        onPressed: () {
-          _showAddSkillDialog();
-        },
-        child: const Icon(Icons.add),
-        elevation: 6,
-      ),
+      floatingActionButton: _tabController.index == 1
+          ? FloatingActionButton(
+              backgroundColor: colorScheme.primary,
+              foregroundColor: Colors.white,
+              onPressed: () {
+                _showAddSkillDialog();
+              },
+              child: const Icon(Icons.add),
+              elevation: 6,
+            )
+          : null,
     );
   }
 
@@ -357,7 +365,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 icon: Icons.people,
                 value: _stats['userCount']?.toString() ?? '0',
                 label: 'Total Users',
-                color: Colors.blue,
+                color: context.sw.give,
               ),
               const SizedBox(width: 12),
               _buildStatCard(
@@ -382,7 +390,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 icon: Icons.auto_awesome,
                 value: _stats['totalSkillsOffered']?.toString() ?? '0',
                 label: 'Skills Offered',
-                color: Colors.purple,
+                color: context.sw.win,
               ),
             ],
           ),
@@ -504,13 +512,13 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                               decoration: BoxDecoration(
-                                color: Colors.purple.withValues(alpha: 0.13),
+                                color: context.sw.get.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: const Text(
+                              child: Text(
                                 'Admin',
                                 style: TextStyle(
-                                  color: Colors.purple,
+                                  color: context.sw.get,
                                   fontWeight: FontWeight.w600,
                                   fontSize: 12,
                                 ),
