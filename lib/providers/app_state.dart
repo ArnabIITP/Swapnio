@@ -8,6 +8,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../models/user_model.dart';
 import '../services/notification_service.dart';
+import '../features/analytics/analytics_provider.dart';
 
 class AppState extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -279,7 +280,8 @@ class AppState extends ChangeNotifier {
       );
       
       await _firestore.collection('users').doc(credential.user!.uid).set(newUser.toMap());
-      
+
+      AnalyticsProvider.log('sign_up', credential.user!.uid, {'method': 'email'});
       _loading = false;
       return true;
     } catch (e) {
@@ -312,6 +314,7 @@ class AppState extends ChangeNotifier {
           .doc(updatedUser.id)
           .set(updatedUser.toMap(), SetOptions(merge: true));
       _currentUser = updatedUser;
+      AnalyticsProvider.log('profile_updated', updatedUser.id, {});
     } catch (e) {
       _error = 'Failed to update profile: $e';
       debugPrint(_error);
@@ -393,7 +396,10 @@ class AppState extends ChangeNotifier {
     
     try {
       await _firestore.collection('swipeRequests').add(requestData);
-      
+
+      AnalyticsProvider.log('swap_request_sent', _currentUser!.id, {
+        'toUserId': requestData['toUserId'],
+      });
       // Add notification for recipient
       await _firestore.collection('notifications').add({
         'userId': requestData['toUserId'],
@@ -450,6 +456,10 @@ class AppState extends ChangeNotifier {
         });
       });
       
+      AnalyticsProvider.log('user_rated', _currentUser!.id, {
+        'ratedUserId': userId,
+        'rating': rating,
+      });
       return true;
     } catch (e) {
       _error = 'Failed to rate user: $e';

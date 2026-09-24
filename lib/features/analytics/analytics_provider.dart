@@ -12,6 +12,15 @@ class AnalyticsProvider extends ChangeNotifier {
   String? get error => _error;
 
   Future<void> logEvent(String eventType, String userId, Map<String, dynamic> details) async {
+    await _writeEvent(eventType, userId, details);
+  }
+
+  /// Fire-and-forget convenience: call from anywhere without a provider in scope.
+  static void log(String eventType, String userId, Map<String, dynamic> details) {
+    _writeEvent(eventType, userId, details).catchError((_) {});
+  }
+
+  static Future<void> _writeEvent(String eventType, String userId, Map<String, dynamic> details) async {
     final event = AnalyticsEvent(
       eventType: eventType,
       userId: userId,

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import '../features/analytics/analytics_provider.dart';
 
 /// Swap sessions turn a chat into a real skill exchange:
 ///
@@ -122,6 +123,12 @@ class SwapSessionService {
         'senderName': myName,
         'senderPhoto': '',
       });
+
+      AnalyticsProvider.log('session_proposed', uid, {
+        'otherUserId': otherUserId,
+        'skillOffered': skillOffered,
+        'skillWanted': skillWanted,
+      });
       return true;
     } catch (e) {
       debugPrint('SwapSessionService.proposeSession failed: $e');
@@ -205,6 +212,16 @@ class SwapSessionService {
       return false;
     }
     if (!transitioned) return true; // already completed before - no re-award
+
+    // Log the completion event for the analytics dashboard.
+    final completerUid = _uid;
+    if (completerUid != null) {
+      AnalyticsProvider.log('session_completed', completerUid, {
+        'swapId': swapId,
+        'skillOffered': skillOffered ?? '',
+        'skillWanted': skillWanted ?? '',
+      });
+    }
 
     // Points/badges are awarded server-side by the `badgeOnCompletedSwap`
     // Cloud Function on the pending->completed transition. Writing the
