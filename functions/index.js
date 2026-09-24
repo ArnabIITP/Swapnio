@@ -153,6 +153,16 @@ exports.badgeOnCompletedSwap = onDocumentUpdated(
 
     const participants = after.participants || [];
     const db = admin.firestore();
+
+    // Community pulse on Home reads this instead of querying `swaps`
+    // directly: that query has no participants filter, so Firestore can't
+    // prove every matching document is readable by a non-admin caller and
+    // rejects the whole request. A maintained counter sidesteps that.
+    await db.collection('stats').doc('public').set(
+        { completedSwaps: admin.firestore.FieldValue.increment(1) },
+        { merge: true },
+    );
+
     for (const uid of participants) {
       if (!uid) continue;
       const ref = db.collection('gamification').doc(uid);
@@ -391,26 +401,15 @@ exports.sessionReminders = onSchedule('every 15 minutes', async () => {
  * Callable (admin only). The caller must have `isAdmin: true` on their own
  * user document; the same check the security rules use.
  */
-exports.adminDeleteUser = onCall(async (request) => {
-  const callerUid = request.auth && request.auth.uid;
-  if (!callerUid) {
-    throw new HttpsError('unauthenticated', 'Sign in first.');
-  }
-
-  const db = admin.firestore();
-  const callerDoc = await db.collection('users').doc(callerUid).get();
-  if (!callerDoc.exists || callerDoc.data().isAdmin !== true) {
-    throw new HttpsError('permission-denied', 'Admins only.');
-  }
-
-  const uid = request.data && request.data.uid;
-  if (!uid || typeof uid !== 'string') {
-    throw new HttpsError('invalid-argument', 'A uid is required.');
-  }
-  if (uid === callerUid) {
-    throw new HttpsError('failed-precondition', 'You cannot delete your own admin account here.');
-  }
-
+/**
+ * The complete wipe used by both delete paths: every collection that can
+ * reference a uid, the login itself, and the public counter. Kept in one
+ * place so "delete my account" and "admin deletes a user" can never drift
+ * apart again - the earlier self-delete path only removed the Auth login and
+ * left every chat, swap and rating behind, so the account looked freshly
+ * re-created (with the same history) the next time that email signed in.
+ */
+async function wipeUserCompletely(db, uid) {
   const deleted = {};
   const deleteDocs = async (label, snapshot) => {
     if (snapshot.empty) return;
@@ -459,7 +458,7 @@ exports.adminDeleteUser = onCall(async (request) => {
   deleted.profile = 1;
 
   // Finally the login. Without this the same email signs back in and is
-  // handed the same uid.
+  // handed the same uid, with nothing actually gone.
   let authDeleted = false;
   try {
     await admin.auth().deleteUser(uid);
@@ -478,6 +477,46 @@ exports.adminDeleteUser = onCall(async (request) => {
     // The counter is cosmetic; never fail a deletion over it.
   }
 
+  return { authDeleted, deleted };
+}
+
+exports.adminDeleteUser = onCall(async (request) => {
+  const callerUid = request.auth && request.auth.uid;
+  if (!callerUid) {
+    throw new HttpsError('unauthenticated', 'Sign in first.');
+  }
+
+  const db = admin.firestore();
+  const callerDoc = await db.collection('users').doc(callerUid).get();
+  if (!callerDoc.exists || callerDoc.data().isAdmin !== true) {
+    throw new HttpsError('permission-denied', 'Admins only.');
+  }
+
+  const uid = request.data && request.data.uid;
+  if (!uid || typeof uid !== 'string') {
+    throw new HttpsError('invalid-argument', 'A uid is required.');
+  }
+  if (uid === callerUid) {
+    throw new HttpsError('failed-precondition', 'You cannot delete your own admin account here.');
+  }
+
+  const { authDeleted, deleted } = await wipeUserCompletely(db, uid);
   console.log(`adminDeleteUser: ${callerUid} deleted ${uid}`, deleted, { authDeleted });
+  return { ok: true, authDeleted, deleted };
+});
+
+/**
+ * A signed-in user deleting their own account, from Profile > Settings.
+ * No admin check needed - the target is always the caller.
+ */
+exports.selfDeleteAccount = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in first.');
+  }
+
+  const db = admin.firestore();
+  const { authDeleted, deleted } = await wipeUserCompletely(db, uid);
+  console.log(`selfDeleteAccount: ${uid} deleted their own account`, deleted, { authDeleted });
   return { ok: true, authDeleted, deleted };
 });

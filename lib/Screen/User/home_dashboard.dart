@@ -15,6 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -52,37 +54,72 @@ class HomeDashboard extends StatefulWidget {
 class _HomeDashboardState extends State<HomeDashboard> {
   String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
-  // Built once in initState, never inside build(): .snapshots() hands back a
-  // new Stream object each call, which makes StreamBuilder re-subscribe on
-  // every rebuild and the whole dashboard visibly churns.
-  late final Stream<QuerySnapshot> _acceptedSessionsStream;
-  late final Stream<QuerySnapshot> _incomingLikesStream;
-  late final Stream<QuerySnapshot> _chatRoomsStream;
-  late final Stream<QuerySnapshot> _completedSessionsStream;
+  // Each collection is watched by exactly one subscription for the life of
+  // this page, with the latest snapshot cached in these fields. Several
+  // places on this screen (the hero card and the unread-chats tile, for
+  // instance) need the same chat-rooms data; giving each of them its own
+  // StreamBuilder bound to the same `.snapshots()` stream meant a widget
+  // that (re)subscribed after the single snapshot event had already fired
+  // never received it and hung on its loading state forever. One
+  // subscription per stream, read from shared state, removes that
+  // possibility entirely.
+  QuerySnapshot? _acceptedSnapshot;
+  QuerySnapshot? _likesSnapshot;
+  QuerySnapshot? _chatRoomsSnapshot;
+  QuerySnapshot? _completedSnapshot;
+  StreamSubscription<QuerySnapshot>? _acceptedSub;
+  StreamSubscription<QuerySnapshot>? _likesSub;
+  StreamSubscription<QuerySnapshot>? _chatRoomsSub;
+  StreamSubscription<QuerySnapshot>? _completedSub;
   late Future<QuerySnapshot> _profileViewsFuture;
   late Future<DocumentSnapshot> _myProfileFuture;
-  late Future<QuerySnapshot> _communityFuture;
+  late Future<DocumentSnapshot> _communityFuture;
 
   @override
   void initState() {
     super.initState();
     final db = FirebaseFirestore.instance;
     final uid = _uid;
-    _acceptedSessionsStream = db
+    _acceptedSub = db
         .collection('swaps')
         .where('participants', arrayContains: uid)
         .where('status', isEqualTo: 'accepted')
-        .snapshots();
-    _incomingLikesStream =
-        db.collection('swipeRequests').where('toUserId', isEqualTo: uid).snapshots();
-    _chatRoomsStream =
-        db.collection('chatRooms').where('users', arrayContains: uid).snapshots();
-    _completedSessionsStream = db
+        .snapshots()
+        .listen((snap) {
+      if (mounted) setState(() => _acceptedSnapshot = snap);
+    });
+    _likesSub = db
+        .collection('swipeRequests')
+        .where('toUserId', isEqualTo: uid)
+        .snapshots()
+        .listen((snap) {
+      if (mounted) setState(() => _likesSnapshot = snap);
+    });
+    _chatRoomsSub = db
+        .collection('chatRooms')
+        .where('users', arrayContains: uid)
+        .snapshots()
+        .listen((snap) {
+      if (mounted) setState(() => _chatRoomsSnapshot = snap);
+    });
+    _completedSub = db
         .collection('swaps')
         .where('participants', arrayContains: uid)
         .where('status', isEqualTo: 'completed')
-        .snapshots();
+        .snapshots()
+        .listen((snap) {
+      if (mounted) setState(() => _completedSnapshot = snap);
+    });
     _loadFutures();
+  }
+
+  @override
+  void dispose() {
+    _acceptedSub?.cancel();
+    _likesSub?.cancel();
+    _chatRoomsSub?.cancel();
+    _completedSub?.cancel();
+    super.dispose();
   }
 
   void _loadFutures() {
@@ -95,8 +132,11 @@ class _HomeDashboardState extends State<HomeDashboard> {
                 Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 7))))
         .get();
     _myProfileFuture = db.collection('users').doc(_uid).get();
-    _communityFuture =
-        db.collection('swaps').where('status', isEqualTo: 'completed').limit(100).get();
+    // Reads a counter the badgeOnCompletedSwap function maintains, rather
+    // than querying `swaps` directly - that query has no participants
+    // filter, so Firestore rejects it outright for non-admins (it can't
+    // prove every matching document is readable by the caller).
+    _communityFuture = db.collection('stats').doc('public').get();
   }
 
   String _greeting() {
@@ -121,41 +161,38 @@ class _HomeDashboardState extends State<HomeDashboard> {
         child: RefreshIndicator(
           color: c.give,
           onRefresh: () async => setState(_loadFutures),
-          child: StreamBuilder<QuerySnapshot>(
-            stream: _completedSessionsStream,
-            builder: (context, completedSnap) {
-              final completed = completedSnap.data?.docs ?? const [];
-              return ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                children: [
-                  FadeSlideIn(child: _buildHeader()),
-                  const SizedBox(height: 18),
-                  FadeSlideIn(
-                    delay: const Duration(milliseconds: 80),
-                    child: _buildWeekStrip(completed),
-                  ),
-                  const SizedBox(height: 22),
-                  FadeSlideIn(
-                    delay: const Duration(milliseconds: 160),
-                    child: _buildHero(),
-                  ),
-                  const SizedBox(height: 26),
-                  const SectionLabel('More for today'),
-                  const SizedBox(height: 12),
-                  FadeSlideIn(
-                    delay: const Duration(milliseconds: 240),
-                    child: _buildTiles(completed),
-                  ),
-                  const SizedBox(height: 14),
-                  _buildProfileViews(),
-                  _buildReciprocityNudge(completed),
-                  const SizedBox(height: 6),
-                  _buildCommunityPulse(),
-                ],
-              );
-            },
-          ),
+          child: Builder(builder: (context) {
+            final completed = _completedSnapshot?.docs ?? const [];
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              children: [
+                FadeSlideIn(child: _buildHeader()),
+                const SizedBox(height: 18),
+                FadeSlideIn(
+                  delay: const Duration(milliseconds: 80),
+                  child: _buildWeekStrip(completed),
+                ),
+                const SizedBox(height: 22),
+                FadeSlideIn(
+                  delay: const Duration(milliseconds: 160),
+                  child: _buildHero(),
+                ),
+                const SizedBox(height: 26),
+                const SectionLabel('More for today'),
+                const SizedBox(height: 12),
+                FadeSlideIn(
+                  delay: const Duration(milliseconds: 240),
+                  child: _buildTiles(completed),
+                ),
+                const SizedBox(height: 14),
+                _buildProfileViews(),
+                _buildReciprocityNudge(completed),
+                const SizedBox(height: 6),
+                _buildCommunityPulse(),
+              ],
+            );
+          }),
         ),
       ),
     );
@@ -303,37 +340,22 @@ class _HomeDashboardState extends State<HomeDashboard> {
   // ----------------------------------------------------------------- hero
 
   Widget _buildHero() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _acceptedSessionsStream,
-      builder: (context, sessionSnap) {
-        final session = _nextSession(sessionSnap.data?.docs ?? const []);
-        // A session within the next two days outranks everything else.
-        if (session != null &&
-            session.$2.difference(DateTime.now()) < const Duration(hours: 48)) {
-          return _sessionHero(session.$1, session.$2);
-        }
-        return StreamBuilder<QuerySnapshot>(
-          stream: _incomingLikesStream,
-          builder: (context, likesSnap) {
-            final likes = likesSnap.data?.docs.length ?? 0;
-            if (likes > 0) return _likesHero(likes);
-            return StreamBuilder<QuerySnapshot>(
-              stream: _chatRoomsStream,
-              builder: (context, chatSnap) {
-                final unread = _unreadRooms(chatSnap.data?.docs ?? const []);
-                if (unread.isNotEmpty) return _chatHero(unread);
-                if (session != null) return _sessionHero(session.$1, session.$2);
-                final completion = _profileCompletion();
-                if (completion != null && completion.$1 < 1) {
-                  return _profileHero(completion.$1, completion.$2);
-                }
-                return _discoverHero();
-              },
-            );
-          },
-        );
-      },
-    );
+    final session = _nextSession(_acceptedSnapshot?.docs ?? const []);
+    // A session within the next two days outranks everything else.
+    if (session != null &&
+        session.$2.difference(DateTime.now()) < const Duration(hours: 48)) {
+      return _sessionHero(session.$1, session.$2);
+    }
+    final likes = _likesSnapshot?.docs.length ?? 0;
+    if (likes > 0) return _likesHero(likes);
+    final unread = _unreadRooms(_chatRoomsSnapshot?.docs ?? const []);
+    if (unread.isNotEmpty) return _chatHero(unread);
+    if (session != null) return _sessionHero(session.$1, session.$2);
+    final completion = _profileCompletion();
+    if (completion != null && completion.$1 < 1) {
+      return _profileHero(completion.$1, completion.$2);
+    }
+    return _discoverHero();
   }
 
   (DocumentSnapshot, DateTime)? _nextSession(List<QueryDocumentSnapshot> docs) {
@@ -603,19 +625,16 @@ class _HomeDashboardState extends State<HomeDashboard> {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _chatRoomsStream,
-              builder: (context, snap) {
-                final n = _unreadRooms(snap.data?.docs ?? const []).length;
-                return _tile(
-                  countValue: n,
-                  value: '$n',
-                  label: n == 1 ? 'unread chat' : 'unread chats',
-                  color: c.text,
-                  onTap: () => widget.onNavigateToTab?.call(2),
-                );
-              },
-            ),
+            child: Builder(builder: (context) {
+              final n = _unreadRooms(_chatRoomsSnapshot?.docs ?? const []).length;
+              return _tile(
+                countValue: n,
+                value: '$n',
+                label: n == 1 ? 'unread chat' : 'unread chats',
+                color: c.text,
+                onTap: () => widget.onNavigateToTab?.call(2),
+              );
+            }),
           ),
         ],
       ),
@@ -763,17 +782,13 @@ class _HomeDashboardState extends State<HomeDashboard> {
 
   /// Social proof: visible activity makes the app feel alive.
   Widget _buildCommunityPulse() {
-    return FutureBuilder<QuerySnapshot>(
+    return FutureBuilder<DocumentSnapshot>(
       future: _communityFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError || !snapshot.hasData) return const SizedBox.shrink();
-        final weekAgo = DateTime.now().subtract(const Duration(days: 7));
-        var recent = 0;
-        for (final doc in snapshot.data!.docs) {
-          final ts = (doc.data() as Map<String, dynamic>)['completedAt'];
-          if (ts is Timestamp && ts.toDate().isAfter(weekAgo)) recent++;
-        }
-        if (recent == 0) return const SizedBox.shrink();
+        final data = snapshot.data!.data() as Map<String, dynamic>?;
+        final total = (data?['completedSwaps'] as num?)?.toInt() ?? 0;
+        if (total == 0) return const SizedBox.shrink();
         final c = context.sw;
         return Padding(
           padding: const EdgeInsets.only(top: 8),
@@ -783,7 +798,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
               Icon(Icons.groups_rounded, size: 15, color: c.textMuted),
               const SizedBox(width: 6),
               Text(
-                '$recent swap${recent == 1 ? '' : 's'} completed this week',
+                '$total swap${total == 1 ? '' : 's'} completed on Swapnio',
                 style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted),
               ),
             ],

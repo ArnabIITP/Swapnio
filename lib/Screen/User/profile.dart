@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -1093,17 +1094,22 @@ class _SettingsTabView extends StatelessWidget {
     navigator.pushNamed(route);
   }
 
-  /// Permanently deletes the account: removes the Firestore profile and signs
-  /// out. Deleting the Firebase Auth record itself needs a recent login - if
-  /// it fails we tell the user to re-authenticate and retry.
+  /// Permanently deletes the account: the login plus every chat, swap,
+  /// request, rating and gamification record that references it. This runs
+  /// server-side (the `selfDeleteAccount` Cloud Function, sharing its wipe
+  /// logic with the admin delete path) because the security rules
+  /// deliberately don't let a client delete another user's documents, and a
+  /// client-only delete previously left every chat and swap behind - the
+  /// account looked freshly re-created, history intact, the next time that
+  /// email signed back in.
   Future<void> _deleteAccount(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete account?'),
         content: const Text(
-          'This permanently removes your profile, skills and settings. '
-          'This action cannot be undone.',
+          'This permanently removes your login and every chat, swap, '
+          'request and rating attached to it. This cannot be undone.',
         ),
         actions: [
           TextButton(
@@ -1118,38 +1124,26 @@ class _SettingsTabView extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !context.mounted) return;
 
     final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context, rootNavigator: true);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
-      // Best-effort cleanup of data the security rules let the owner remove.
-      try {
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).delete();
-      } catch (e) {
-        debugPrint('Profile doc deletion failed: $e');
-      }
-
-      // Deleting the auth record requires a recent login.
-      try {
-        await user.delete();
-      } catch (_) {
-        await FirebaseAuth.instance.signOut();
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Your profile data was removed. To finish deleting your login, '
-              'sign in again and repeat Delete Account.',
-            ),
-          ),
-        );
-        return;
-      }
-
+      await FirebaseFunctions.instance.httpsCallable('selfDeleteAccount').call();
+      navigator.pop();
       await FirebaseAuth.instance.signOut();
+    } on FirebaseFunctionsException catch (e) {
+      navigator.pop();
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not delete account: ${e.message ?? e.code}')),
+      );
     } catch (e) {
+      navigator.pop();
       messenger.showSnackBar(
         SnackBar(content: Text('Could not delete account: $e')),
       );
