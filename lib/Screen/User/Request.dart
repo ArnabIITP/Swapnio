@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -32,27 +34,47 @@ class _RequestPageState extends State<RequestPage>
   // Streams are built once here rather than inside build(): .snapshots()
   // returns a new Stream each call, so building them in build() makes
   // StreamBuilder re-subscribe (and flash its loading state) on every rebuild.
-  late final Stream<QuerySnapshot> _requestsStream;
-  late final Stream<QuerySnapshot> _chatsStream;
-  late final Stream<QuerySnapshot> _sessionsStream;
   // Requests declined but still inside their undo window.
   final Set<String> _hiddenRequestIds = {};
+
+  // Each collection is watched by exactly one subscription for the whole
+  // life of this page, with the latest snapshot cached here. Both the header
+  // count and the tab body read this same field. Two separate StreamBuilders
+  // bound to the same Firestore `.snapshots()` stream - one for the header,
+  // one for the tab - used to each subscribe independently; a subscriber
+  // that (re)attaches after the single snapshot event has already fired
+  // never receives it and waits forever for a change that was never coming,
+  // which is exactly what made the Requests tab hang on a second visit.
+  QuerySnapshot? _requestsSnapshot;
+  QuerySnapshot? _chatsSnapshot;
+  QuerySnapshot? _sessionsSnapshot;
+  StreamSubscription<QuerySnapshot>? _requestsSub;
+  StreamSubscription<QuerySnapshot>? _chatsSub;
+  StreamSubscription<QuerySnapshot>? _sessionsSub;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _requestsStream = FirebaseFirestore.instance
+    _requestsSub = FirebaseFirestore.instance
         .collection('swipeRequests')
         .where('toUserId', isEqualTo: currentUserId)
         .orderBy('timestamp', descending: true)
-        .snapshots();
-    _chatsStream = FirebaseFirestore.instance
+        .snapshots()
+        .listen((snap) {
+      if (mounted) setState(() => _requestsSnapshot = snap);
+    });
+    _chatsSub = FirebaseFirestore.instance
         .collection('chatRooms')
         .where('users', arrayContains: currentUserId)
         .orderBy('lastMessageTime', descending: true)
-        .snapshots();
-    _sessionsStream = SwapSessionService.instance.mySessionsStream();
+        .snapshots()
+        .listen((snap) {
+      if (mounted) setState(() => _chatsSnapshot = snap);
+    });
+    _sessionsSub = SwapSessionService.instance.mySessionsStream().listen((snap) {
+      if (mounted) setState(() => _sessionsSnapshot = snap);
+    });
 
     // Mark notifications as read when opening this page
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -65,6 +87,9 @@ class _RequestPageState extends State<RequestPage>
 
   @override
   void dispose() {
+    _requestsSub?.cancel();
+    _chatsSub?.cancel();
+    _sessionsSub?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -280,20 +305,17 @@ class _RequestPageState extends State<RequestPage>
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-                    child: StreamBuilder<QuerySnapshot>(
-                      stream: _requestsStream,
-                      builder: (context, snap) {
-                        final n = (snap.data?.docs ?? const [])
-                            .where((d) => !_hiddenRequestIds.contains(d.id))
-                            .length;
-                        return Text(
-                          n == 0
-                              ? 'Requests, chats and sessions in one place'
-                              : '$n ${n == 1 ? 'person wants' : 'people want'} to swap with you',
-                          style: GoogleFonts.manrope(fontSize: 13, color: c.textMuted),
-                        );
-                      },
-                    ),
+                    child: Builder(builder: (context) {
+                      final n = (_requestsSnapshot?.docs ?? const [])
+                          .where((d) => !_hiddenRequestIds.contains(d.id))
+                          .length;
+                      return Text(
+                        n == 0
+                            ? 'Requests, chats and sessions in one place'
+                            : '$n ${n == 1 ? 'person wants' : 'people want'} to swap with you',
+                        style: GoogleFonts.manrope(fontSize: 13, color: c.textMuted),
+                      );
+                    }),
                   ),
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -475,32 +497,26 @@ class _RequestPageState extends State<RequestPage>
   Future<void> _confirmNoShow(String swapId) => confirmNoShowFlow(context, swapId);
 
   Widget _buildSessionsTab() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _sessionsStream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final docs = snapshot.data?.docs ?? [];
-        if (docs.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.event_available_rounded,
-            title: 'No swap sessions yet',
-            message:
-                'Open a chat and tap "Propose swap session" to schedule your '
-                'first skill exchange.',
-            actionLabel: 'Find someone to swap with',
-            onAction: () => widget.onNavigateToTab?.call(1),
-          );
-        }
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(0, 10, 0, 16),
-          itemCount: docs.length,
-          itemBuilder: (context, index) =>
-              _buildSessionCard(docs[index].id, docs[index].data()),
-        );
-      },
+    if (_sessionsSnapshot == null) {
+      return const ListSkeleton();
+    }
+    final docs = _sessionsSnapshot?.docs ?? [];
+    if (docs.isEmpty) {
+      return _buildEmptyState(
+        icon: Icons.event_available_rounded,
+        title: 'No swap sessions yet',
+        message:
+            'Open a chat and tap "Propose swap session" to schedule your '
+            'first skill exchange.',
+        actionLabel: 'Find someone to swap with',
+        onAction: () => widget.onNavigateToTab?.call(1),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(0, 10, 0, 16),
+      itemCount: docs.length,
+      itemBuilder: (context, index) =>
+          _buildSessionCard(docs[index].id, docs[index].data()),
     );
   }
 
@@ -619,85 +635,80 @@ class _RequestPageState extends State<RequestPage>
   }
 
   Widget _buildRequestsTab() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _requestsStream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
-          return _buildLoadingShimmer();
-        }
-        final requests = (snapshot.data?.docs ?? const [])
-            .where((d) => !_hiddenRequestIds.contains(d.id))
-            .toList();
-        if (requests.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.favorite_border_rounded,
-            useSwapMotif: true,
-            title: 'No requests yet',
-            message: 'Requests show up here when someone likes you. Liking people '
-                'first is the fastest way to get there.',
-            actionLabel: 'Start discovering',
-            onAction: () => widget.onNavigateToTab?.call(1),
+    if (_requestsSnapshot == null) {
+      return _buildLoadingShimmer();
+    }
+    final requests = (_requestsSnapshot?.docs ?? const [])
+        .where((d) => !_hiddenRequestIds.contains(d.id))
+        .toList();
+    if (requests.isEmpty) {
+      return _buildEmptyState(
+        icon: Icons.favorite_border_rounded,
+        useSwapMotif: true,
+        title: 'No requests yet',
+        message: 'Requests show up here when someone likes you. Liking people '
+            'first is the fastest way to get there.',
+        actionLabel: 'Start discovering',
+        onAction: () => widget.onNavigateToTab?.call(1),
+      );
+    }
+    final c = context.sw;
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(0, 10, 0, 16),
+      itemCount: requests.length + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 6),
+            child: Row(
+              children: [
+                Icon(Icons.west_rounded, size: 14, color: c.textMuted),
+                const SizedBox(width: 4),
+                Text('Swipe to decline',
+                    style: GoogleFonts.manrope(
+                        fontSize: 11.5, fontWeight: FontWeight.w800, color: c.textMuted)),
+                const Spacer(),
+                Text('Swipe to accept',
+                    style: GoogleFonts.manrope(
+                        fontSize: 11.5, fontWeight: FontWeight.w800, color: c.give)),
+                const SizedBox(width: 4),
+                Icon(Icons.east_rounded, size: 14, color: c.give),
+              ],
+            ),
           );
         }
-        final c = context.sw;
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(0, 10, 0, 16),
-          itemCount: requests.length + 1,
-          itemBuilder: (context, index) {
-            if (index == 0) {
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 6),
-                child: Row(
-                  children: [
-                    Icon(Icons.west_rounded, size: 14, color: c.textMuted),
-                    const SizedBox(width: 4),
-                    Text('Swipe to decline',
-                        style: GoogleFonts.manrope(
-                            fontSize: 11.5, fontWeight: FontWeight.w800, color: c.textMuted)),
-                    const Spacer(),
-                    Text('Swipe to accept',
-                        style: GoogleFonts.manrope(
-                            fontSize: 11.5, fontWeight: FontWeight.w800, color: c.give)),
-                    const SizedBox(width: 4),
-                    Icon(Icons.east_rounded, size: 14, color: c.give),
-                  ],
-                ),
-              );
-            }
-            final doc = requests[index - 1];
-            final data = doc.data() as Map<String, dynamic>;
-            final docId = doc.id;
+        final doc = requests[index - 1];
+        final data = doc.data() as Map<String, dynamic>;
+        final docId = doc.id;
 
-            // Swipe right to accept, left to decline. The item is hidden
-            // synchronously in onDismissed so it is never still in the tree
-            // after dismissal.
-            return Dismissible(
-              key: ValueKey('request_$docId'),
-              background: _swipeBackground(
-                color: c.win,
-                foreground: c.onWin,
-                icon: Icons.check_rounded,
-                label: 'Accept',
-                alignLeft: true,
-              ),
-              secondaryBackground: _swipeBackground(
-                color: c.surfaceLow,
-                foreground: c.textMuted,
-                icon: Icons.close_rounded,
-                label: 'Decline',
-                alignLeft: false,
-              ),
-              onDismissed: (direction) {
-                if (direction == DismissDirection.startToEnd) {
-                  setState(() => _hiddenRequestIds.add(docId));
-                  _acceptFromSwipe(docId, data);
-                } else {
-                  _rejectRequest(docId);
-                }
-              },
-              child: _requestCard(docId, data),
-            );
+        // Swipe right to accept, left to decline. The item is hidden
+        // synchronously in onDismissed so it is never still in the tree
+        // after dismissal.
+        return Dismissible(
+          key: ValueKey('request_$docId'),
+          background: _swipeBackground(
+            color: c.win,
+            foreground: c.onWin,
+            icon: Icons.check_rounded,
+            label: 'Accept',
+            alignLeft: true,
+          ),
+          secondaryBackground: _swipeBackground(
+            color: c.surfaceLow,
+            foreground: c.textMuted,
+            icon: Icons.close_rounded,
+            label: 'Decline',
+            alignLeft: false,
+          ),
+          onDismissed: (direction) {
+            if (direction == DismissDirection.startToEnd) {
+              setState(() => _hiddenRequestIds.add(docId));
+              _acceptFromSwipe(docId, data);
+            } else {
+              _rejectRequest(docId);
+            }
           },
+          child: _requestCard(docId, data),
         );
       },
     );
@@ -707,7 +718,10 @@ class _RequestPageState extends State<RequestPage>
     final c = context.sw;
     final rawName = (data['fromName'] as String?)?.trim() ?? '';
     final name = rawName.isEmpty ? 'Swapnio user' : rawName;
-    final availability = (data['availability'] ?? '').toString().trim();
+    final rawAvailability = data['availability'];
+    final availability = rawAvailability is List
+        ? rawAvailability.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).join(', ')
+        : (rawAvailability ?? '').toString().trim();
     Widget button(String label, Color bg, Color fg, VoidCallback onTap) => Expanded(
           child: Pressable(
             onTap: onTap,
@@ -775,129 +789,124 @@ class _RequestPageState extends State<RequestPage>
   }
 
   Widget _buildChatsTab() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _chatsStream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
-          return _buildLoadingShimmer();
-        }
-        final chatRooms = snapshot.data?.docs ?? const [];
-        if (chatRooms.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.chat_bubble_outline_rounded,
-            useSwapMotif: true,
-            title: 'No chats yet',
-            message: 'Chats open up once you and someone else both say yes. '
-                'Find someone whose skills match yours.',
-            actionLabel: 'Start discovering',
-            onAction: () => widget.onNavigateToTab?.call(1),
-          );
-        }
-        final c = context.sw;
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(0, 10, 0, 16),
-          itemCount: chatRooms.length,
-          itemBuilder: (context, index) {
-            final data = chatRooms[index].data() as Map<String, dynamic>;
-            final chatRoomId = chatRooms[index].id;
-            final users = List<String>.from(data['users'] ?? []);
-            final otherUserId = users.firstWhere((id) => id != currentUserId, orElse: () => '');
-            if (otherUserId.isEmpty) return const SizedBox.shrink();
+    if (_chatsSnapshot == null) {
+      return _buildLoadingShimmer();
+    }
+    final chatRooms = _chatsSnapshot?.docs ?? const [];
+    if (chatRooms.isEmpty) {
+      return _buildEmptyState(
+        icon: Icons.chat_bubble_outline_rounded,
+        useSwapMotif: true,
+        title: 'No chats yet',
+        message: 'Chats open up once you and someone else both say yes. '
+            'Find someone whose skills match yours.',
+        actionLabel: 'Start discovering',
+        onAction: () => widget.onNavigateToTab?.call(1),
+      );
+    }
+    final c = context.sw;
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(0, 10, 0, 16),
+      itemCount: chatRooms.length,
+      itemBuilder: (context, index) {
+        final data = chatRooms[index].data() as Map<String, dynamic>;
+        final chatRoomId = chatRooms[index].id;
+        final users = List<String>.from(data['users'] ?? []);
+        final otherUserId = users.firstWhere((id) => id != currentUserId, orElse: () => '');
+        if (otherUserId.isEmpty) return const SizedBox.shrink();
 
-            final userNames = data['userNames'] as Map<String, dynamic>?;
-            final userPhotos = data['userPhotos'] as Map<String, dynamic>?;
-            final otherUserName = (userNames?[otherUserId] ?? 'User').toString();
-            final otherUserPhoto = (userPhotos?[otherUserId] ?? '').toString();
-            final lastMessage = (data['lastMessage'] as String?) ?? 'No messages yet';
-            final lastMessageTime = data['lastMessageTime'] as Timestamp?;
-            final unreadCount =
-                ((data['unreadCount'] as Map<String, dynamic>?)?[currentUserId] as num?)?.toInt() ??
-                    0;
-            final unread = unreadCount > 0;
+        final userNames = data['userNames'] as Map<String, dynamic>?;
+        final userPhotos = data['userPhotos'] as Map<String, dynamic>?;
+        final otherUserName = (userNames?[otherUserId] ?? 'User').toString();
+        final otherUserPhoto = (userPhotos?[otherUserId] ?? '').toString();
+        final lastMessage = (data['lastMessage'] as String?) ?? 'No messages yet';
+        final lastMessageTime = data['lastMessageTime'] as Timestamp?;
+        final unreadCount =
+            ((data['unreadCount'] as Map<String, dynamic>?)?[currentUserId] as num?)?.toInt() ??
+                0;
+        final unread = unreadCount > 0;
 
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-              child: Pressable(
-                scale: 0.98,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ChatPage(
-                      chatRoomId: chatRoomId,
-                      otherUserName: otherUserName,
-                      otherUserPhoto: otherUserPhoto,
-                      otherUserId: otherUserId,
-                    ),
-                  ),
-                ),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration:
-                      BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(20)),
-                  child: Row(
-                    children: [
-                      SwapAvatar(
-                          name: otherUserName, photoUrl: otherUserPhoto, size: 50, radius: 17),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(otherUserName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.manrope(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w800,
-                                          color: c.text)),
-                                ),
-                                Text(_shortAgo(lastMessageTime),
-                                    style: GoogleFonts.manrope(
-                                        fontSize: 11.5,
-                                        fontWeight: unread ? FontWeight.w800 : FontWeight.w500,
-                                        color: unread ? c.give : c.textMuted)),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(lastMessage,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.manrope(
-                                          fontSize: 13,
-                                          fontWeight: unread ? FontWeight.w700 : FontWeight.w500,
-                                          color: unread ? c.text : c.textMuted)),
-                                ),
-                                if (unread) ...[
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    padding:
-                                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                    decoration: BoxDecoration(
-                                        color: c.give, borderRadius: BorderRadius.circular(10)),
-                                    child: Text(unreadCount > 99 ? '99+' : '$unreadCount',
-                                        style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold)),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+          child: Pressable(
+            scale: 0.98,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ChatPage(
+                  chatRoomId: chatRoomId,
+                  otherUserName: otherUserName,
+                  otherUserPhoto: otherUserPhoto,
+                  otherUserId: otherUserId,
                 ),
               ),
-            );
-          },
+            ),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration:
+                  BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(20)),
+              child: Row(
+                children: [
+                  SwapAvatar(
+                      name: otherUserName, photoUrl: otherUserPhoto, size: 50, radius: 17),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(otherUserName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.manrope(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w800,
+                                      color: c.text)),
+                            ),
+                            Text(_shortAgo(lastMessageTime),
+                                style: GoogleFonts.manrope(
+                                    fontSize: 11.5,
+                                    fontWeight: unread ? FontWeight.w800 : FontWeight.w500,
+                                    color: unread ? c.give : c.textMuted)),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(lastMessage,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.manrope(
+                                      fontSize: 13,
+                                      fontWeight: unread ? FontWeight.w700 : FontWeight.w500,
+                                      color: unread ? c.text : c.textMuted)),
+                            ),
+                            if (unread) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
+                                    color: c.give, borderRadius: BorderRadius.circular(10)),
+                                child: Text(unreadCount > 99 ? '99+' : '$unreadCount',
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         );
       },
     );

@@ -140,16 +140,22 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     }
     setState(() => _saving = true);
     try {
+      // Experience level is not a day of the week - it must never be
+      // written into `availability`, which Discover, Requests and the
+      // profile's own availability editor all read as weekday names.
       var updated = current.copyWith(
         name: _name.text.trim(),
         bio: '${_headline.text.trim()} ${_location.text.trim()} ${_bio.text.trim()}'.trim(),
         skillsOffered: List.of(_offers),
         skillsWanted: List.of(_learns),
-        availability: [_experience],
       );
       if (!await app.updateUserProfile(updated)) {
         throw StateError(app.error);
       }
+      await FirebaseFirestore.instance.collection('users').doc(current.id).set(
+        {'experienceLevel': _experience},
+        SetOptions(merge: true),
+      );
       if (_photo != null) await app.uploadProfileImage(_photo!);
       if (_resume != null) await app.uploadResume(_resume!);
       final goal = _goal.text.trim();

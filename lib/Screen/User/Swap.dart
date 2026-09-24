@@ -131,48 +131,47 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
         if (mounted) setState(() => _isLoading = false);
         return;
       }
-      final currentUserDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUserId)
-          .get();
+
+      // Fire all independent Firestore queries in parallel instead of
+      // sequentially — cuts load time from ~4 round-trips to ~1.
+      final results = await Future.wait([
+        FirebaseFirestore.instance.collection('users').doc(currentUserId).get(),                 // 0: my profile
+        FirebaseFirestore.instance.collection('users').get(),                                     // 1: all users
+        FirebaseFirestore.instance.collection('swipeRequests')
+            .where('fromUserId', isEqualTo: currentUserId).get(),                                // 2: my sent requests
+        FirebaseFirestore.instance.collection('chatRooms')
+            .where('users', arrayContains: currentUserId).get(),                                 // 3: my chat rooms
+        SafetyService.instance.hiddenUserIds(),                                                  // 4: blocked users
+      ]);
+
+      final currentUserDoc = results[0] as DocumentSnapshot;
+      final snapshot = results[1] as QuerySnapshot;
+      final requestedSnapshot = results[2] as QuerySnapshot;
+      final chatRoomsSnapshot = results[3] as QuerySnapshot;
+      final hiddenIds = results[4] as Set<String>;
+
       List<String> mySkillsWanted = [];
       List<String> mySkillsOffered = [];
       List<String> myAvailability = [];
       if (currentUserDoc.exists) {
-        final currentUserData = currentUserDoc.data()!;
+        final currentUserData = currentUserDoc.data() as Map<String, dynamic>;
         mySkillsWanted = List<String>.from(currentUserData['skillsWanted'] ?? []);
         mySkillsOffered = List<String>.from(currentUserData['skillsOffered'] ?? []);
         myAvailability = List<String>.from(currentUserData['availability'] ?? []);
       }
-      // Fetch all users and exclude the current user by document ID
-      // in Dart. Firestore's `isNotEqualTo` on an `id` field would silently
-      // drop documents that don't store that field (see UserModel.toMap()).
-      final snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .get();
-      final requestedSnapshot = await FirebaseFirestore.instance
-          .collection('swipeRequests')
-          .where('fromUserId', isEqualTo: currentUserId)
-          .get();
-      // Users we already chat with (accepted match) shouldn't reappear in
-      // the swipe deck.
-      final chatRoomsSnapshot = await FirebaseFirestore.instance
-          .collection('chatRooms')
-          .where('users', arrayContains: currentUserId)
-          .get();
-      final hiddenIds = await SafetyService.instance.hiddenUserIds();
+
       final requestedUserIds = requestedSnapshot.docs
-          .map((doc) => (doc.data()['toUserId'] as String?) ?? '')
+          .map((doc) => (doc.data() as Map<String, dynamic>)['toUserId'] as String? ?? '')
           .where((id) => id.isNotEmpty)
           .toSet();
       final matchedUserIds = chatRoomsSnapshot.docs
-          .expand((doc) => List<String>.from(doc.data()['users'] ?? []))
+          .expand((doc) => List<String>.from((doc.data() as Map<String, dynamic>)['users'] ?? []))
           .where((id) => id != currentUserId)
           .toSet();
       final allUsers = snapshot.docs
           .where((doc) => doc.id != currentUserId)
           .map((doc) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>;
         final userId = doc.id;
         final skillsOffered = List<String>.from(data['skillsOffered'] ?? []);
         final skillsWanted = List<String>.from(data['skillsWanted'] ?? []);

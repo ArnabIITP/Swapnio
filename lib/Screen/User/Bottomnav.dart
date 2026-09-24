@@ -32,14 +32,23 @@ class _BottomNavPageState extends State<BottomNavPage> {
   void initState() {
     super.initState();
     _checkConnectivity();
-    _connectivityTimer =
-        Timer.periodic(const Duration(seconds: 10), (_) => _checkConnectivity());
+    _scheduleConnectivityPoll();
   }
 
   @override
   void dispose() {
     _connectivityTimer?.cancel();
     super.dispose();
+  }
+
+  /// Adaptive poll: when offline, check every 2 s so recovery feels instant;
+  /// when online, every 5 s to save battery.
+  void _scheduleConnectivityPoll() {
+    _connectivityTimer?.cancel();
+    final interval = _offline
+        ? const Duration(seconds: 2)
+        : const Duration(seconds: 5);
+    _connectivityTimer = Timer.periodic(interval, (_) => _checkConnectivity());
   }
 
   /// Firestore persistence keeps the app usable offline, but it silently
@@ -49,12 +58,16 @@ class _BottomNavPageState extends State<BottomNavPage> {
     bool offline;
     try {
       final result = await InternetAddress.lookup('firestore.googleapis.com')
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 2));
       offline = result.isEmpty || result.first.rawAddress.isEmpty;
     } catch (_) {
       offline = true;
     }
-    if (mounted && offline != _offline) setState(() => _offline = offline);
+    if (mounted && offline != _offline) {
+      setState(() => _offline = offline);
+      // Transition happened — switch to the appropriate poll cadence.
+      _scheduleConnectivityPoll();
+    }
   }
 
   /// Re-tapping the active tab scrolls it back to the top. Each tab owns its
@@ -158,7 +171,13 @@ class _BottomNavPageState extends State<BottomNavPage> {
                 : const SizedBox(width: double.infinity),
           ),
           Expanded(
-            child: KeyedSubtree(key: _bodyKey, child: _screens[_selectedIndex]),
+            child: KeyedSubtree(
+              key: _bodyKey,
+              child: IndexedStack(
+                index: _selectedIndex,
+                children: _screens,
+              ),
+            ),
           ),
         ],
       ),
