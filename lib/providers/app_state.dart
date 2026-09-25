@@ -378,10 +378,27 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Trust/reputation fields (isAdmin, isBanned, rating, ratingsCount,
+      // completedSwaps, sessionsAttended, noShowCount) are deliberately left
+      // out of this write: they're admin/Cloud-Function-only under the
+      // security rules now, and including them here risks reverting a
+      // reputation change that happened elsewhere (e.g. someone rated you)
+      // while `_currentUser`'s cached copy was stale - the whole edit would
+      // get rejected instead of just the fields this screen actually owns.
+      final profileFields = Map<String, dynamic>.from(updatedUser.toMap())
+        ..removeWhere((key, _) => const {
+              'isAdmin',
+              'isBanned',
+              'rating',
+              'ratingsCount',
+              'completedSwaps',
+              'sessionsAttended',
+              'noShowCount',
+            }.contains(key));
       await _firestore
           .collection('users')
           .doc(updatedUser.id)
-          .set(updatedUser.toMap(), SetOptions(merge: true));
+          .set(profileFields, SetOptions(merge: true));
       _currentUser = updatedUser;
       AnalyticsProvider.log('profile_updated', updatedUser.id, {});
     } catch (e) {

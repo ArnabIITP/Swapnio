@@ -72,38 +72,27 @@ class UserDataProvider extends ChangeNotifier {
                   totalRating += (doc.data()['rating'] ?? 0).toDouble();
                 }
                 double averageRating = totalRating / ratingsSnapshot.docs.length;
-                
-                // Only write when the average actually changed, otherwise every
-                // snapshot triggers another update -> another snapshot (write loop).
-                final storedRating = (_userData!['rating'] as num?)?.toDouble() ?? 0.0;
-                if ((averageRating - storedRating).abs() > 0.01) {
-                  _userData!['rating'] = averageRating;
-
-                  // Also update in Firestore for persistence
-                  await _firestore
-                    .collection('users')
-                    .doc(user.uid)
-                    .update({'rating': averageRating});
-                }
+                // Display-only recompute from the `ratings` collection (the
+                // source of truth): `rating` is a trust/reputation field, so
+                // security rules now block a user writing it on their own
+                // document - only the "other user submits a rating" flow
+                // (app_state.rateUser / chat_page._submitRating) may update
+                // it, which is exactly what keeps it from being self-forged.
+                _userData!['rating'] = averageRating;
               }
-              
+
               // Fetch completed swaps count
               final swapsSnapshot = await _firestore
                 .collection('swaps')
                 .where('participants', arrayContains: user.uid)
                 .where('status', isEqualTo: 'completed')
                 .get();
-              
-              // Update completed swaps count
+
+              // Display-only, same reasoning as `rating` above - not
+              // persisted back since `completedSwaps` is self-write-protected.
               int completedSwapsCount = swapsSnapshot.docs.length;
               _userData!['completedSwaps'] = completedSwapsCount;
-              
-              // Also update in Firestore for persistence
-              await _firestore
-                .collection('users')
-                .doc(user.uid)
-                .update({'completedSwaps': completedSwapsCount});
-              
+
             } catch (e) {
               print('Error fetching real-time metrics: $e');
               // Continue with existing data even if metrics update fails

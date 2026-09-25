@@ -24,6 +24,13 @@ class _UserDetailPageState extends State<UserDetailPage> {
   bool _sendingRequest = false;
   Map<String, dynamic> _privacy = const {};
   bool _isMatch = false;
+  // The security rules now enforce `profileVisibility: 'private'` server-side
+  // (a viewer who isn't the owner/admin gets permission-denied on the read
+  // itself, rather than receiving the document and hiding it client-side).
+  // That's caught below and distinguished from "no such user" so the
+  // purpose-built private-profile message shows instead of a wrong
+  // "User not found".
+  bool _permissionDenied = false;
 
   bool get _isCurrentUser =>
       FirebaseAuth.instance.currentUser?.uid == widget.userId;
@@ -126,6 +133,16 @@ class _UserDetailPageState extends State<UserDetailPage> {
         _reviews = reviewsList;
         _isLoading = false;
       });
+    } on FirebaseException catch (e) {
+      if (e.code == 'permission-denied') {
+        setState(() {
+          _permissionDenied = true;
+          _isLoading = false;
+        });
+        return;
+      }
+      print('Error loading user data: $e');
+      setState(() => _isLoading = false);
     } catch (e) {
       print('Error loading user data: $e');
       setState(() => _isLoading = false);
@@ -222,11 +239,13 @@ class _UserDetailPageState extends State<UserDetailPage> {
     backgroundColor: context.sw.bg,
     body: _isLoading
       ? const Center(child: CircularProgressIndicator())
-      : _userData == null
-        ? const Center(child: Text('User not found'))
-        : !_profileVisible
-          ? _buildPrivateProfileState()
-          : _buildUserProfile(),
+      : _permissionDenied
+        ? _buildPrivateProfileState()
+        : _userData == null
+          ? const Center(child: Text('User not found'))
+          : !_profileVisible
+            ? _buildPrivateProfileState()
+            : _buildUserProfile(),
   );
   }
 

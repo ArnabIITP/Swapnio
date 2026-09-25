@@ -38,6 +38,38 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
 
+    function changedNoneOf(keys) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(keys);
+    }
+
+    // Fields on a user's own document that only an admin (isAdmin) or a
+    // Cloud Function (admin SDK - bypasses these rules) may change: trust /
+    // moderation state and reputation numbers the whole no-show and rating
+    // system depends on. `isSelf()` used to grant unrestricted self-write
+    // access to the entire document, which meant any signed-up user could
+    // set their own `isAdmin: true`, clear `isBanned`, or fabricate a
+    // perfect rating/attendance record with one Firestore write. This list
+    // is what closes that off while leaving normal profile edits untouched.
+    function protectedUserFields() {
+      return ['isAdmin', 'isBanned', 'rating', 'ratingsCount', 'completedSwaps',
+              'sessionsAttended', 'noShowCount'];
+    }
+
+    // The `update` guard above doesn't cover `create` - a brand-new account's
+    // very first write could otherwise set isAdmin: true directly, since
+    // there's no `resource.data` yet to diff against. Every protected field
+    // must be absent or at its safe starting value on creation.
+    function createsWithSafeUserDefaults() {
+      let data = request.resource.data;
+      return (!('isAdmin' in data) || data.isAdmin == false)
+        && (!('isBanned' in data) || data.isBanned == false)
+        && (!('rating' in data) || data.rating == 0)
+        && (!('ratingsCount' in data) || data.ratingsCount == 0)
+        && (!('completedSwaps' in data) || data.completedSwaps == 0)
+        && (!('sessionsAttended' in data) || data.sessionsAttended == 0)
+        && (!('noShowCount' in data) || data.noShowCount == 0);
+    }
+
     // No-show enforcement: someone who repeatedly fails to turn up loses the
     // ability to book more sessions until their record recovers. New accounts
     // (fewer than 3 resolved sessions) always pass, so a single early no-show
@@ -52,14 +84,28 @@ service cloud.firestore {
 
     // ------------------------------------------------------------------ users
     match /users/{userId} {
-      // Discoverability: every signed-in user can browse profiles.
-      allow read: if isSignedIn();
-      allow create: if isSelf(userId);
-      // The owner may edit their profile; other users may only touch the
-      // aggregate reputation fields written by the rating flow (ratingsCount
-      // counts received ratings; completedSwaps counts finished sessions).
-      allow update: if isSelf(userId)
-        || (isSignedIn() && changedKeysOnly(['rating', 'ratingsCount', 'completedSwaps', 'lastUpdated']));
+      // Discoverability: every signed-in user can browse profiles, unless the
+      // owner set profileVisibility to 'private' - self and admins can always
+      // read. ('matches'-only visibility still needs a client/UI-level check
+      // today; enforcing it here would require a cross-collection read on
+      // every Discover-feed document and hasn't been done yet.)
+      allow read: if isSignedIn() && (
+        isSelf(userId)
+        || isAdmin()
+        || resource.data.get('privacy', {}).get('profileVisibility', 'public') != 'private');
+      allow create: if isSelf(userId) && createsWithSafeUserDefaults();
+      // The owner may edit their own profile fields, but not the
+      // trust/reputation fields in protectedUserFields() - those are
+      // admin/Cloud-Function-only. Other users may only touch the aggregate
+      // reputation fields written by the rating flow (ratingsCount counts
+      // received ratings; completedSwaps counts finished sessions).
+      allow update: if (isSelf(userId) && changedNoneOf(protectedUserFields()))
+        // Only an OTHER signed-in user (the rater, via the rating flow) may
+        // touch these aggregate fields - without the !isSelf() check here,
+        // this branch let the owner bypass protectedUserFields() entirely
+        // and self-write rating/ratingsCount/completedSwaps directly.
+        || (isSignedIn() && !isSelf(userId) && changedKeysOnly(['rating', 'ratingsCount', 'completedSwaps', 'lastUpdated']))
+        || isAdmin();
       allow delete: if isSelf(userId) || isAdmin();
 
       // Per-user preferences (notifications / privacy / appearance).
@@ -89,8 +135,12 @@ service cloud.firestore {
     // ---------------------------------------------------------- notifications
     match /notifications/{notificationId} {
       allow read, update, delete: if isSignedIn() && resource.data.userId == uid();
-      // Any signed-in user may notify another user (request / accepted / rating).
-      allow create: if isSignedIn() && request.resource.data.userId is string;
+      // Any signed-in user may notify another user (request / accepted /
+      // rating), but if a senderId is included it must be the caller's own -
+      // otherwise anyone could spoof `senderName`/`senderId` to impersonate
+      // another user (or "Swapnio Support") in a push notification.
+      allow create: if isSignedIn() && request.resource.data.userId is string
+        && (!('senderId' in request.resource.data) || request.resource.data.senderId == uid());
     }
 
     // ------------------------------------------------------ chat rooms & chat
@@ -149,9 +199,13 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------ gamification data
+    // Points/level/badges are only ever awarded by Cloud Functions (admin SDK
+    // bypasses these rules) - there is no legitimate client write path here,
+    // so `isSelf()` previously let any user set their own points/badges
+    // directly instead of earning them.
     match /gamification/{userId} {
       allow read: if isSignedIn();
-      allow write: if isSelf(userId);
+      allow write: if isAdmin();
     }
 
     match /progress/{userId} {
