@@ -288,27 +288,50 @@ class _ComplaintsPageState extends State<ComplaintsPage> {
           const SizedBox(height: 8),
           Row(
             children: [
-              Text(
-                createdAt != null ? DateFormat.yMMMd().add_jm().format(createdAt.toDate()) : '',
-                style: TextStyle(fontSize: 11, color: context.sw.textMuted),
+              Expanded(
+                child: Text(
+                  createdAt != null ? DateFormat.yMMMd().add_jm().format(createdAt.toDate()) : '',
+                  style: TextStyle(fontSize: 11, color: context.sw.textMuted),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const Spacer(),
-              if (status != ComplaintService.statusInProgress &&
-                  status != ComplaintService.statusResolved)
-                TextButton(
-                  onPressed: () => _resolve(doc.id, status: ComplaintService.statusInProgress),
-                  child: const Text('In progress'),
-                ),
-              if (status != ComplaintService.statusResolved)
-                ElevatedButton(
-                  onPressed: () => _resolve(doc.id),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: context.sw.give,
-                    foregroundColor: Colors.white,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  child: const Text('Resolve'),
-                ),
+              const SizedBox(width: 8),
+              // Wrap (not Row+Spacer) so the two buttons drop to a second
+              // line instead of overflowing when the card is narrow - a
+              // plain Row here overflowed by ~60px on-device (confirmed via
+              // live QA) once both buttons and the date competed for space.
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (status != ComplaintService.statusInProgress &&
+                      status != ComplaintService.statusResolved)
+                    TextButton(
+                      onPressed: () => _resolve(doc.id, status: ComplaintService.statusInProgress),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('In progress'),
+                    ),
+                  if (status != ComplaintService.statusResolved)
+                    ElevatedButton(
+                      onPressed: () => _resolve(doc.id),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: context.sw.give,
+                        foregroundColor: Colors.white,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Resolve'),
+                    ),
+                ],
+              ),
             ],
           ),
         ],
