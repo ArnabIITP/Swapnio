@@ -25,6 +25,7 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'Screen/Auth/Startpage.dart';
+import 'Screen/Auth/legal_consent_page.dart';
 import 'Screen/splash_screen.dart';
 import 'Screen/User/Bottomnav.dart';
 import 'Screen/User/chat_page.dart';
@@ -152,6 +153,10 @@ class _MyAppState extends State<MyApp> {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
+        }
+
+        if (appState.needsLegalConsent) {
+          return const LegalConsentPage();
         }
 
         if (appState.needsSetup) {

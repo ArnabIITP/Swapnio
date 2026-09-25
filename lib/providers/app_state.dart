@@ -37,6 +37,17 @@ class AppState extends ChangeNotifier {
   bool get needsSetup =>
       _currentUser != null && _currentUser!.skillsOffered.isEmpty;
 
+  /// True when this account has never recorded accepting the Terms &
+  /// Privacy Policy and confirming it is 18+ - gates entry to the app ahead
+  /// of [needsSetup], so nobody reaches onboarding without having agreed.
+  /// Deliberately keyed off the persisted flag rather than "is this a brand
+  /// new account": an account that signed up before this gate existed, or
+  /// that backed out of the consent screen last time, must still be asked
+  /// on its next sign-in rather than slipping through as "not new".
+  bool get needsLegalConsent =>
+      _currentUser != null &&
+      !(_currentUser!.acceptedTerms && _currentUser!.ageConfirmed);
+
   AppState() {
     initializeUser();
   }
@@ -216,7 +227,16 @@ class AppState extends ChangeNotifier {
 
   /// Signs in with Google and exchanges the Google token for a Firebase
   /// credential so the normal auth-state flow can load the user's profile.
-  Future<bool> signInWithGoogle() async {
+  ///
+  /// [preAcceptedLegal] is true when the caller already collected the terms
+  /// + age checkboxes *before* starting the Google flow (the Signup page's
+  /// "Continue with Google" button, gated on those boxes) - in that case the
+  /// consent is written in the same call so the account never has a window
+  /// where it exists but hasn't recorded consent. Callers that didn't
+  /// pre-collect consent (the homepage's "Continue with Google") leave this
+  /// false; [AppState.needsLegalConsent] then gates entry until the person
+  /// explicitly agrees post sign-in.
+  Future<bool> signInWithGoogle({bool preAcceptedLegal = false}) async {
     _loading = true;
     _error = '';
     notifyListeners();
@@ -243,10 +263,19 @@ class AppState extends ChangeNotifier {
         throw StateError('Google did not return an authentication token.');
       }
 
-      await _auth
+      final userCredential = await _auth
           .signInWithCredential(credential)
           .timeout(const Duration(seconds: 30));
       debugPrint('Firebase Google sign-in completed');
+
+      if (preAcceptedLegal) {
+        final uid = userCredential.user!.uid;
+        await _firestore.collection('users').doc(uid).set({
+          'acceptedTerms': true,
+          'ageConfirmed': true,
+          'termsAcceptedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
       return true;
     } on FirebaseAuthException catch (e) {
       _error = e.message ?? 'Google sign-in failed.';
@@ -260,26 +289,66 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Records the Terms/Privacy Policy + 18+ consent for the signed-in
+  /// account - called from the post-sign-in [LegalConsentPage] gate. Once
+  /// this succeeds, [needsLegalConsent] flips false and the root router in
+  /// main.dart moves the user on to setup or the main app.
+  Future<bool> acceptLegalTerms() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null || _currentUser == null) return false;
+    try {
+      await _firestore.collection('users').doc(uid).set({
+        'acceptedTerms': true,
+        'ageConfirmed': true,
+        'termsAcceptedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      _currentUser = _currentUser!.copyWith(acceptedTerms: true, ageConfirmed: true);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = 'Could not save your consent: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
   // Sign up new user
-  Future<bool> signUp(String email, String password, String name) async {
+  Future<bool> signUp(
+    String email,
+    String password,
+    String name, {
+    required bool acceptedTerms,
+    required bool ageConfirmed,
+  }) async {
+    if (!acceptedTerms || !ageConfirmed) {
+      _error = 'Please accept the Terms & Privacy Policy and confirm you are 18 or older.';
+      notifyListeners();
+      return false;
+    }
+
     _loading = true;
     _error = '';
     notifyListeners();
 
     try {
       final credential = await _auth.createUserWithEmailAndPassword(email: email, password: password);
-      
+
       // Update display name
       await credential.user?.updateDisplayName(name);
-      
+
       // Create user in Firestore
       final newUser = UserModel(
         id: credential.user!.uid,
         email: email,
         name: name,
+        acceptedTerms: acceptedTerms,
+        ageConfirmed: ageConfirmed,
       );
-      
-      await _firestore.collection('users').doc(credential.user!.uid).set(newUser.toMap());
+
+      await _firestore.collection('users').doc(credential.user!.uid).set({
+        ...newUser.toMap(),
+        'termsAcceptedAt': FieldValue.serverTimestamp(),
+      });
 
       AnalyticsProvider.log('sign_up', credential.user!.uid, {'method': 'email'});
       _loading = false;

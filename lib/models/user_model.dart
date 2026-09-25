@@ -11,6 +11,8 @@ class UserModel {
   final bool isAdmin;
   final double rating;
   final int completedSwaps;
+  final bool acceptedTerms;
+  final bool ageConfirmed;
 
   UserModel({
     required this.id,
@@ -25,6 +27,8 @@ class UserModel {
     this.isAdmin = false,
     this.rating = 0.0,
     this.completedSwaps = 0,
+    this.acceptedTerms = false,
+    this.ageConfirmed = false,
   });
 
   factory UserModel.fromMap(Map<String, dynamic> data, String id) {
@@ -57,6 +61,8 @@ class UserModel {
       isAdmin: data['isAdmin'] ?? false,
       rating: (data['rating'] ?? 0.0).toDouble(),
       completedSwaps: data['completedSwaps'] ?? 0,
+      acceptedTerms: data['acceptedTerms'] ?? false,
+      ageConfirmed: data['ageConfirmed'] ?? false,
     );
   }
 
@@ -74,6 +80,8 @@ class UserModel {
       'isAdmin': isAdmin,
       'rating': rating,
       'completedSwaps': completedSwaps,
+      'acceptedTerms': acceptedTerms,
+      'ageConfirmed': ageConfirmed,
     };
   }
 
@@ -90,6 +98,8 @@ class UserModel {
     bool? isAdmin,
     double? rating,
     int? completedSwaps,
+    bool? acceptedTerms,
+    bool? ageConfirmed,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -104,6 +114,8 @@ class UserModel {
       isAdmin: isAdmin ?? this.isAdmin,
       rating: rating ?? this.rating,
       completedSwaps: completedSwaps ?? this.completedSwaps,
+      acceptedTerms: acceptedTerms ?? this.acceptedTerms,
+      ageConfirmed: ageConfirmed ?? this.ageConfirmed,
     );
   }
 }
