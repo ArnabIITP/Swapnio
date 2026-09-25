@@ -792,7 +792,9 @@ class _RequestPageState extends State<RequestPage>
     if (_chatsSnapshot == null) {
       return _buildLoadingShimmer();
     }
-    final chatRooms = _chatsSnapshot?.docs ?? const [];
+    final chatRooms = (_chatsSnapshot?.docs ?? const [])
+        .where((doc) => (doc.data() as Map<String, dynamic>)['unmatched'] != true)
+        .toList();
     if (chatRooms.isEmpty) {
       return _buildEmptyState(
         icon: Icons.chat_bubble_outline_rounded,

@@ -332,18 +332,27 @@ exports.trackSessionReliability = onDocumentUpdated(
 );
 
 /**
- * Reminds both participants ~1 hour before an accepted swap session.
+ * Reminds both participants of an accepted swap session twice: ~1 hour
+ * before, and again ~15 minutes before.
  *
- * Runs every 15 minutes and looks at a 20-minute window starting 50 minutes
- * from now, so each session's `scheduledFor` falls into exactly one run's
- * window under normal conditions. `reminderSent` is set inside a transaction
- * before notifying, so an overlapping run (or a retry) can't double-send.
+ * Runs every 15 minutes. Each reminder tier looks at its own window around
+ * its target offset (60 min / 15 min from now) sized so a session's
+ * `scheduledFor` falls into exactly one run's window under normal
+ * conditions, and is guarded by its own `reminderSent` flag inside a
+ * transaction so an overlapping run (or a retry) can't double-send - and so
+ * the two tiers can fire independently of each other for the same session.
  */
-exports.sessionReminders = onSchedule('every 15 minutes', async () => {
-  const db = admin.firestore();
+async function sendSessionReminders(db, {
+  offsetMinutes,
+  windowMinutes,
+  flagField,
+  messageFor,
+}) {
   const nowMs = Date.now();
-  const windowStart = admin.firestore.Timestamp.fromMillis(nowMs + 50 * 60 * 1000);
-  const windowEnd = admin.firestore.Timestamp.fromMillis(nowMs + 70 * 60 * 1000);
+  const halfWindowMs = (windowMinutes / 2) * 60 * 1000;
+  const targetMs = nowMs + offsetMinutes * 60 * 1000;
+  const windowStart = admin.firestore.Timestamp.fromMillis(targetMs - halfWindowMs);
+  const windowEnd = admin.firestore.Timestamp.fromMillis(targetMs + halfWindowMs);
 
   const snapshot = await db
     .collection('swaps')
@@ -354,12 +363,12 @@ exports.sessionReminders = onSchedule('every 15 minutes', async () => {
 
   for (const doc of snapshot.docs) {
     const data = doc.data();
-    if (data.reminderSent) continue;
+    if (data[flagField]) continue;
 
     const claimed = await db.runTransaction(async (tx) => {
       const fresh = await tx.get(doc.ref);
-      if (!fresh.exists || fresh.data().reminderSent) return false;
-      tx.update(doc.ref, { reminderSent: true });
+      if (!fresh.exists || fresh.data()[flagField]) return false;
+      tx.update(doc.ref, { [flagField]: true });
       return true;
     });
     if (!claimed) continue;
@@ -381,7 +390,7 @@ exports.sessionReminders = onSchedule('every 15 minutes', async () => {
           db.collection('notifications').add({
             userId: uid,
             type: 'session_reminder',
-            message: `Your swap session is coming up at ${timeStr}`,
+            message: messageFor(timeStr),
             timestamp: admin.firestore.FieldValue.serverTimestamp(),
             read: false,
             senderName: 'Swapnio',
@@ -390,6 +399,22 @@ exports.sessionReminders = onSchedule('every 15 minutes', async () => {
         ),
     );
   }
+}
+
+exports.sessionReminders = onSchedule('every 15 minutes', async () => {
+  const db = admin.firestore();
+  await sendSessionReminders(db, {
+    offsetMinutes: 60,
+    windowMinutes: 20,
+    flagField: 'reminderSent',
+    messageFor: (timeStr) => `Your swap session is coming up at ${timeStr}`,
+  });
+  await sendSessionReminders(db, {
+    offsetMinutes: 15,
+    windowMinutes: 16,
+    flagField: 'reminderSent15',
+    messageFor: (timeStr) => `Your swap session starts in about 15 minutes (${timeStr})`,
+  });
 });
 
 /**

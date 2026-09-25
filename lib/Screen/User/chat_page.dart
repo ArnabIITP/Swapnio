@@ -10,6 +10,8 @@ import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../providers/app_state.dart';
+import '../../services/chat_service.dart';
+import '../../services/google_calendar_service.dart';
 import '../../services/swap_service.dart';
 import '../../theme.dart';
 import '../../ui/swapnio_widgets.dart';
@@ -413,6 +415,8 @@ class _ChatPageState extends State<ChatPage> {
                   userId: widget.otherUserId,
                   displayName: widget.otherUserName,
                 );
+              } else if (value == 'unmatch') {
+                _confirmUnmatch();
               }
             },
             itemBuilder: (context) => const [
@@ -423,6 +427,16 @@ class _ChatPageState extends State<ChatPage> {
                     Icon(Icons.shield_outlined, size: 18),
                     SizedBox(width: 10),
                     Text('Block or report'),
+                  ],
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'unmatch',
+                child: Row(
+                  children: [
+                    Icon(Icons.heart_broken_outlined, size: 18, color: Colors.redAccent),
+                    SizedBox(width: 10),
+                    Text('Unmatch', style: TextStyle(color: Colors.redAccent)),
                   ],
                 ),
               ),
@@ -511,71 +525,149 @@ class _ChatPageState extends State<ChatPage> {
                 ),
               ),
             ),
-          // Message Input
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 12.0,
-              vertical: 8.0,
-            ),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withValues(alpha: 0.13),
-                  blurRadius: 8,
-                  offset: const Offset(0, -2),
+          // Message Input - replaced by a banner once either side unmatches.
+          StreamBuilder<DocumentSnapshot>(
+            stream: _roomStream,
+            builder: (context, roomSnapshot) {
+              final room =
+                  (roomSnapshot.data?.data() as Map<String, dynamic>?) ?? {};
+              if (room['unmatched'] == true) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  color: Theme.of(context).colorScheme.surface,
+                  child: SafeArea(
+                    top: false,
+                    child: Row(
+                      children: [
+                        Icon(Icons.heart_broken_outlined,
+                            size: 18, color: context.sw.textMuted),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'You unmatched - you can no longer message each other.',
+                            style: TextStyle(fontSize: 13, color: context.sw.textMuted),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12.0,
+                  vertical: 8.0,
                 ),
-              ],
-            ),
-            child: SafeArea(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      focusNode: _messageFocusNode,
-                      decoration: InputDecoration(
-                        hintText: 'Type a message...',
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 12,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(28),
-                          borderSide: BorderSide.none,
-                        ),
-                        filled: true,
-                        fillColor: Theme.of(context).scaffoldBackgroundColor,
-                      ),
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                      textCapitalization: TextCapitalization.sentences,
-                      onSubmitted: (_) => _sendMessage(),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withValues(alpha: 0.13),
+                      blurRadius: 8,
+                      offset: const Offset(0, -2),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  Pressable(
-                    onTap: _sendMessage,
-                    child: Container(
-                      width: 46,
-                      height: 46,
-                      decoration: BoxDecoration(
-                        color: context.sw.give,
-                        shape: BoxShape.circle,
+                  ],
+                ),
+                child: SafeArea(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _messageController,
+                          focusNode: _messageFocusNode,
+                          decoration: InputDecoration(
+                            hintText: 'Type a message...',
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 12,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(28),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            fillColor: Theme.of(context).scaffoldBackgroundColor,
+                          ),
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                          textCapitalization: TextCapitalization.sentences,
+                          onSubmitted: (_) => _sendMessage(),
+                        ),
                       ),
-                      child: const Icon(Icons.arrow_upward_rounded,
-                          color: Colors.white, semanticLabel: 'Send'),
-                    ),
+                      const SizedBox(width: 6),
+                      Pressable(
+                        onTap: _sendMessage,
+                        child: Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: context.sw.give,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.arrow_upward_rounded,
+                              color: Colors.white, semanticLabel: 'Send'),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
+                ),
+              );
+            },
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _confirmUnmatch() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Unmatch ${widget.otherUserName}?'),
+        content: const Text(
+          "You'll no longer be able to message each other and this chat "
+          'will disappear from both your inboxes. Any pending swap request '
+          'between you is also cleared. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Unmatch'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    final ok = await ChatService.instance.unmatch(
+      widget.chatRoomId,
+      widget.otherUserId,
+    );
+    if (!ok) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Could not unmatch. Please try again.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+    messenger.showSnackBar(
+      SnackBar(content: Text('You unmatched ${widget.otherUserName}.')),
+    );
+    navigator.pop();
   }
 
   Future<void> _showProposeSessionDialog() async {
@@ -607,9 +699,14 @@ class _ChatPageState extends State<ChatPage> {
 
     final offeredController = TextEditingController();
     final wantedController = TextEditingController();
-    final meetingLinkController = TextEditingController();
     final agendaController = TextEditingController();
     DateTime scheduled = DateTime.now().add(const Duration(days: 1));
+
+    // Google-auth accounts usually already have a cached Google session on
+    // this device, so calendar access can be picked up without a prompt.
+    // Email/password accounts fall through to the "Connect" button below.
+    bool calendarConnected = await GoogleCalendarService.instance.ensureConnected();
+    bool connectingCalendar = false;
 
     final proposed = await showDialog<bool>(
       context: context,
@@ -681,15 +778,69 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: meetingLinkController,
-                  keyboardType: TextInputType.url,
-                  decoration: const InputDecoration(
-                    labelText: 'Meeting link (optional)',
-                    hintText: 'Google Meet / Zoom / Jitsi URL',
+                const SizedBox(height: 14),
+                if (calendarConnected)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: dialogContext.sw.give.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, size: 18, color: dialogContext.sw.give),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Google Calendar connected - a Meet link and calendar '
+                            'invite will be created automatically.',
+                            style: TextStyle(fontSize: 12.5, color: dialogContext.sw.give),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: connectingCalendar
+                          ? null
+                          : () async {
+                              setDialogState(() => connectingCalendar = true);
+                              final ok = await GoogleCalendarService.instance.connect();
+                              setDialogState(() {
+                                calendarConnected = ok;
+                                connectingCalendar = false;
+                              });
+                              if (!ok && context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Could not connect Google Calendar. You can still '
+                                      'propose the session without a meeting link.',
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                      icon: connectingCalendar
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.calendar_month, size: 16),
+                      label: Text(
+                        connectingCalendar ? 'Connecting...' : 'Connect Google Calendar',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: dialogContext.sw.give,
+                        side: BorderSide(color: dialogContext.sw.give),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
                   ),
-                ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: agendaController,
@@ -728,6 +879,20 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     final messenger = ScaffoldMessenger.of(context);
+    final agenda = agendaController.text.trim();
+
+    // Only attempt event creation if calendar access is actually connected -
+    // otherwise the session still gets proposed, just without a meeting link.
+    String meetingLink = '';
+    if (calendarConnected) {
+      meetingLink = await GoogleCalendarService.instance.createSwapEvent(
+            title: 'Swapnio swap session with ${widget.otherUserName}',
+            start: scheduled,
+            description: agenda.isEmpty ? 'Swap session arranged via Swapnio.' : agenda,
+          ) ??
+          '';
+    }
+
     final ok = await SwapSessionService.instance.proposeSession(
       otherUserId: widget.otherUserId,
       otherUserName: widget.otherUserName,
@@ -735,15 +900,18 @@ class _ChatPageState extends State<ChatPage> {
       skillOffered: offered,
       skillWanted: wanted,
       scheduledFor: scheduled,
-      meetingLink: meetingLinkController.text.trim(),
-      agenda: agendaController.text.trim(),
+      meetingLink: meetingLink,
+      agenda: agenda,
     );
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          ok
-              ? 'Session proposed - they can accept it from the Requests tab'
-              : 'Could not propose the session. Please try again.',
+          !ok
+              ? 'Could not propose the session. Please try again.'
+              : calendarConnected && meetingLink.isEmpty
+                  ? 'Session proposed, but the Meet link could not be created - '
+                      'you can add one later from the session details.'
+                  : 'Session proposed - they can accept it from the Requests tab',
         ),
         backgroundColor: ok ? context.sw.give : Colors.redAccent,
       ),
