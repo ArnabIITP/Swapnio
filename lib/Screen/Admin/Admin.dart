@@ -7,6 +7,8 @@ import '../../theme.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../ui/swapnio_kit.dart';
 import '../../ui/swapnio_widgets.dart';
+import '../../services/feedback_service.dart';
+import 'complaints_page.dart';
 
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
@@ -30,7 +32,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     // The add-skill FAB only makes sense on the Skills tab - shown on every
     // tab it sat permanently over the Users list, covering each row's
     // ban/delete buttons as you scrolled.
@@ -234,6 +236,22 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
               Padding(
                 padding: const EdgeInsets.all(8),
                 child: Pressable(
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ComplaintsPage()),
+                  ),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration:
+                        BoxDecoration(color: context.sw.surface, shape: BoxShape.circle),
+                    child: Icon(Icons.report_gmailerrorred_outlined,
+                        size: 20, color: context.sw.text, semanticLabel: 'Complaints'),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Pressable(
                   onTap: () {
                     _fetchAllUsers();
                     _fetchAdminStats();
@@ -313,6 +331,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                   Tab(height: 40, text: 'Users'),
                   Tab(height: 40, text: 'Skills'),
                   Tab(height: 40, text: 'Reports'),
+                  Tab(height: 40, text: 'Feedback'),
                 ],
               ),
             ),
@@ -324,6 +343,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                   _buildUsersTab(),
                   _buildSkillsTab(),
                   _buildReportsTab(),
+                  _buildFeedbackTab(),
                 ],
               ),
             ),
@@ -867,6 +887,99 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
       ),
     );
   }
+  /// Real-time feed of user-submitted feedback, each attributed to the
+  /// account that sent it (name + email captured at submission time).
+  Widget _buildFeedbackTab() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FeedbackService.instance.feedbackStream(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final docs = snapshot.data?.docs ?? const [];
+        if (docs.isEmpty) {
+          return Center(
+            child: Text('No feedback yet.', style: TextStyle(color: context.sw.textMuted)),
+          );
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data() as Map<String, dynamic>;
+            final rating = (data['rating'] as num?)?.toInt() ?? 0;
+            final message = (data['message'] ?? '').toString();
+            final userName = (data['userName'] ?? 'Unknown user').toString();
+            final userEmail = (data['userEmail'] ?? '').toString();
+            final status = (data['status'] ?? 'new').toString();
+            final createdAt = data['createdAt'] as Timestamp?;
+            return SurfaceCard(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(userName,
+                                  style: const TextStyle(fontWeight: FontWeight.bold)),
+                              if (userEmail.isNotEmpty)
+                                Text(userEmail,
+                                    style: TextStyle(
+                                        fontSize: 12, color: context.sw.textMuted)),
+                            ],
+                          ),
+                        ),
+                        if (rating > 0)
+                          Row(
+                            children: List.generate(
+                              5,
+                              (i) => Icon(
+                                i < rating ? Icons.star : Icons.star_border,
+                                size: 15,
+                                color: context.sw.give,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(message, style: const TextStyle(fontSize: 13.5)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          createdAt != null
+                              ? '${createdAt.toDate()}'.split('.').first
+                              : '',
+                          style: TextStyle(fontSize: 11, color: context.sw.textMuted),
+                        ),
+                        const Spacer(),
+                        if (status == 'new')
+                          TextButton(
+                            onPressed: () =>
+                                FeedbackService.instance.markReviewed(docs[index].id),
+                            child: const Text('Mark reviewed'),
+                          )
+                        else
+                          TintTag('Reviewed', color: context.sw.success),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
           Future<void> _loadSkills() async {
     try {
       final snapshot = await _firestore

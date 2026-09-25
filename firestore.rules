@@ -193,6 +193,24 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
+    // ------------------------------------------------------------ feedback
+    // General app feedback, always attributed to the sender. Only the
+    // sender and admins may read it back; only admins may mark it reviewed.
+    match /feedback/{feedbackId} {
+      allow create: if isSignedIn() && request.resource.data.userId == uid();
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == uid());
+      allow update, delete: if isAdmin();
+    }
+
+    // ----------------------------------------------------------- complaints
+    // A specific issue filed for moderators to resolve - separate from
+    // `reports` (which flags another user's behaviour).
+    match /complaints/{complaintId} {
+      allow create: if isSignedIn() && request.resource.data.userId == uid();
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == uid());
+      allow update, delete: if isAdmin();
+    }
+
     // -------------------------------------------------------- profile views
     // One doc per viewer per profile per day (id encodes all three), so
     // repeat visits don't inflate the count. Only the viewed person can read

@@ -11,10 +11,12 @@ import 'package:swapnio/Screen/User/privacy_settings.dart';
 import 'package:swapnio/providers/user_data_provider.dart';
 import 'package:swapnio/providers/app_state.dart';
 import '../Admin/Admin.dart';
+import 'complaint_page.dart';
 import '../../features/gamification/gamification_model.dart';
 import '../../features/gamification/gamification_provider.dart';
 import '../../services/skill_catalog_service.dart';
 import '../../services/swap_service.dart';
+import '../../ui/feedback_sheet.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../theme.dart';
@@ -1032,6 +1034,35 @@ class _SettingsTabView extends StatelessWidget {
               title: 'Profile Verification',
               subtitle: 'Verify your email and phone',
               onTap: () => _closeThenNamed(context, '/verification'),
+            ),
+            const SizedBox(height: 24),
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Text(
+                'Support'.toUpperCase(),
+                style: AppTheme.label(color: context.sw.textMuted),
+              ),
+            ),
+            const SizedBox(height: 8),
+            _buildSettingsButton(
+              context,
+              icon: Icons.chat_bubble_outline,
+              title: 'Send Feedback',
+              subtitle: 'Tell us what is working and what is not',
+              onTap: () {
+                final navigator = Navigator.of(context, rootNavigator: true);
+                navigator.pop();
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (navigator.mounted) showFeedbackDialog(navigator.context);
+                });
+              },
+            ),
+            _buildSettingsButton(
+              context,
+              icon: Icons.report_gmailerrorred_outlined,
+              title: 'Report an Issue',
+              subtitle: 'File a complaint for our team to resolve',
+              onTap: () => _closeThenPush(context, const ComplaintPage()),
             ),
             if (isAdmin) ...[
               _buildSettingsButton(
