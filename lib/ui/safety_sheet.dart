@@ -36,8 +36,11 @@ Future<void> showSafetySheet(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Row(
                 children: [
-                  Icon(Icons.shield_outlined,
-                      color: sheetContext.sw.give, size: 22),
+                  Icon(
+                    Icons.shield_outlined,
+                    color: sheetContext.sw.give,
+                    size: 22,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -56,22 +59,28 @@ Future<void> showSafetySheet(
               leading: Icon(Icons.block, color: sheetContext.sw.get),
               title: const Text('Block user'),
               subtitle: const Text(
-                  'Hides them from your feed and removes pending requests'),
+                'Hides them from your feed and removes pending requests',
+              ),
               onTap: () async {
                 Navigator.pop(sheetContext);
-                await _confirmAndBlock(context,
-                    userId: userId, displayName: displayName);
+                await _confirmAndBlock(
+                  context,
+                  userId: userId,
+                  displayName: displayName,
+                );
               },
             ),
             ListTile(
-              leading: Icon(Icons.flag_outlined,
-                  color: sheetContext.sw.get),
+              leading: Icon(Icons.flag_outlined, color: sheetContext.sw.get),
               title: const Text('Report user'),
               subtitle: const Text('Sends a report to the Swapnio moderators'),
               onTap: () async {
                 Navigator.pop(sheetContext);
-                await showReportDialog(context,
-                    userId: userId, displayName: displayName);
+                await showReportDialog(
+                  context,
+                  userId: userId,
+                  displayName: displayName,
+                );
               },
             ),
             const SizedBox(height: 4),
@@ -115,13 +124,17 @@ Future<void> _confirmAndBlock(
   if (confirmed != true) return;
   if (!context.mounted) return;
   final messenger = ScaffoldMessenger.of(context);
-  final ok = await SafetyService.instance
-      .blockUser(userId, displayName: displayName);
+  final ok = await SafetyService.instance.blockUser(
+    userId,
+    displayName: displayName,
+  );
   messenger.showSnackBar(
     SnackBar(
-      content: Text(ok
-          ? '$displayName has been blocked'
-          : 'Could not block $displayName. Please try again.'),
+      content: Text(
+        ok
+            ? '$displayName has been blocked'
+            : 'Could not block $displayName. Please try again.',
+      ),
       backgroundColor: ok ? context.sw.give : Colors.redAccent,
     ),
   );
@@ -191,9 +204,11 @@ Future<void> showReportDialog(
   );
   messenger.showSnackBar(
     SnackBar(
-      content: Text(ok
-          ? 'Thanks - our moderators will review this report.'
-          : 'Could not send the report. Please try again.'),
+      content: Text(
+        ok
+            ? 'Thanks - our moderators will review this report.'
+            : 'Could not send the report. Please try again.',
+      ),
       backgroundColor: ok ? context.sw.give : Colors.redAccent,
     ),
   );

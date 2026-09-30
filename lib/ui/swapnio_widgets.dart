@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../theme.dart';
+import 'verified_badge.dart';
 
 /// Shrinks slightly while pressed so every tap gets an immediate physical
 /// response, even before the action it triggers has finished.
@@ -119,6 +120,52 @@ class SwapSplit extends StatelessWidget {
       );
     }
 
+    // One-way session: a single bar, "YOU TEACH" or "YOU LEARN".
+    if (giveSkill.isEmpty != getSkill.isEmpty) {
+      final teaching = getSkill.isEmpty;
+      return Container(
+        padding: const EdgeInsets.fromLTRB(14, 11, 14, 12),
+        decoration: BoxDecoration(
+          color: teaching ? c.give : c.get,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              teaching ? Icons.school_rounded : Icons.menu_book_rounded,
+              size: 20,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    teaching ? 'YOU TEACH · ONE-WAY' : 'YOU LEARN · ONE-WAY',
+                    style: AppTheme.label(
+                      fontSize: 9,
+                      color: Colors.white.withValues(alpha: 0.75),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    teaching ? giveSkill : getSkill,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.manrope(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Row(
       children: [
         half(giveLabel, giveSkill, c.give, true),
@@ -211,6 +258,10 @@ class SwapAvatar extends StatelessWidget {
   final Color? color;
   final double? radius;
 
+  /// Draws the verified ring and seal (email + phone verified) inside the
+  /// same [size] box.
+  final bool verified;
+
   const SwapAvatar({
     super.key,
     required this.name,
@@ -218,17 +269,35 @@ class SwapAvatar extends StatelessWidget {
     this.size = 46,
     this.color,
     this.radius,
+    this.verified = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (verified) {
+      return VerifiedRing(
+        size: size,
+        radius: radius ?? size * 0.34,
+        showSeal: size >= 30,
+        child: (inner, innerRadius) => SwapAvatar(
+          name: name,
+          photoUrl: photoUrl,
+          size: inner,
+          color: color,
+          radius: innerRadius,
+        ),
+      );
+    }
     final r = BorderRadius.circular(radius ?? size * 0.34);
     final initial = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
     final fallback = Container(
       width: size,
       height: size,
       alignment: Alignment.center,
-      decoration: BoxDecoration(color: color ?? context.sw.get, borderRadius: r),
+      decoration: BoxDecoration(
+        color: color ?? context.sw.get,
+        borderRadius: r,
+      ),
       child: Text(
         initial,
         style: AppTheme.display(fontSize: size * 0.4, color: Colors.white),
@@ -305,8 +374,15 @@ class SwapnioMark extends StatelessWidget {
                 child: Container(
                   width: 124 * k,
                   height: 124 * k,
-                  decoration: const BoxDecoration(color: ink, shape: BoxShape.circle),
-                  child: Icon(Icons.swap_horiz_rounded, size: 68 * k, color: c.win),
+                  decoration: const BoxDecoration(
+                    color: ink,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.swap_horiz_rounded,
+                    size: 68 * k,
+                    color: c.win,
+                  ),
                 ),
               ),
             ],
@@ -336,8 +412,10 @@ class AnimatedSwapnioMark extends StatefulWidget {
 
 class _AnimatedSwapnioMarkState extends State<AnimatedSwapnioMark>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _controller =
-      AnimationController(vsync: this, duration: widget.duration)..forward();
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.duration,
+  )..forward();
 
   late final Animation<double> _tile = CurvedAnimation(
     parent: _controller,
@@ -430,14 +508,19 @@ class _AnimatedSwapnioMarkState extends State<AnimatedSwapnioMark>
                           child: Container(
                             width: 124 * k,
                             height: 124 * k,
-                            decoration:
-                                const BoxDecoration(color: ink, shape: BoxShape.circle),
+                            decoration: const BoxDecoration(
+                              color: ink,
+                              shape: BoxShape.circle,
+                            ),
                             child: Transform.rotate(
                               angle: (1 - _glyph.value) * 3.14159,
                               child: Opacity(
                                 opacity: _glyph.value.clamp(0.0, 1.0),
-                                child: Icon(Icons.swap_horiz_rounded,
-                                    size: 68 * k, color: c.win),
+                                child: Icon(
+                                  Icons.swap_horiz_rounded,
+                                  size: 68 * k,
+                                  color: c.win,
+                                ),
                               ),
                             ),
                           ),

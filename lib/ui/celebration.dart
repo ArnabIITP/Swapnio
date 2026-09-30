@@ -38,7 +38,7 @@ class _ConfettiPainter extends CustomPainter {
   final double progress;
 
   _ConfettiPainter({required this.pieces, required this.progress})
-      : super(repaint: null);
+    : super(repaint: null);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -46,18 +46,26 @@ class _ConfettiPainter extends CustomPainter {
     for (final piece in pieces) {
       // Each piece starts a little later than the last, so the burst reads
       // as a shower rather than a single flat wave.
-      final local = ((progress - piece.delay) / (1 - piece.delay)).clamp(0.0, 1.0);
+      final local = ((progress - piece.delay) / (1 - piece.delay)).clamp(
+        0.0,
+        1.0,
+      );
       if (local <= 0) continue;
 
       // Gravity-ish easing: rises briefly, then accelerates downward.
       final dy = (local * local * 1.6 - local * 0.35) * size.height * 1.3;
       final dx = piece.horizontalDrift * local * size.width * 0.5;
-      final opacity = local > 0.75 ? (1 - (local - 0.75) / 0.25).clamp(0.0, 1.0) : 1.0;
+      final opacity = local > 0.75
+          ? (1 - (local - 0.75) / 0.25).clamp(0.0, 1.0)
+          : 1.0;
 
       paint.color = piece.color.withValues(alpha: opacity);
 
       canvas.save();
-      canvas.translate(piece.startX * size.width + dx, piece.startY * size.height + dy);
+      canvas.translate(
+        piece.startX * size.width + dx,
+        piece.startY * size.height + dy,
+      );
       canvas.rotate(local * piece.rotationSpeed * math.pi * 2);
       canvas.drawRect(
         Rect.fromCenter(
@@ -173,10 +181,8 @@ Future<void> showCelebrationDialog(
         tween: Tween(begin: 0, end: 1),
         duration: const Duration(milliseconds: 620),
         curve: Curves.elasticOut,
-        builder: (context, value, child) => Transform.scale(
-          scale: value.clamp(0.0, 1.2),
-          child: child,
-        ),
+        builder: (context, value, child) =>
+            Transform.scale(scale: value.clamp(0.0, 1.2), child: child),
         child: Dialog(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -212,7 +218,9 @@ Future<void> showCelebrationDialog(
                   headline,
                   textAlign: TextAlign.center,
                   style: AppTheme.display(
-                      fontSize: 25, color: Theme.of(dialogContext).colorScheme.onSurface),
+                    fontSize: 25,
+                    color: Theme.of(dialogContext).colorScheme.onSurface,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Text(
@@ -221,16 +229,12 @@ Future<void> showCelebrationDialog(
                   style: TextStyle(
                     fontSize: 14.5,
                     height: 1.4,
-                    color: Theme.of(dialogContext)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.75),
+                    color: Theme.of(
+                      dialogContext,
+                    ).colorScheme.onSurface.withValues(alpha: 0.75),
                   ),
                 ),
-                if (extra != null) ...[
-                  const SizedBox(height: 16),
-                  extra,
-                ],
+                if (extra != null) ...[const SizedBox(height: 16), extra],
                 const SizedBox(height: 22),
                 SizedBox(
                   width: double.infinity,

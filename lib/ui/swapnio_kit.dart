@@ -36,9 +36,16 @@ class SwapHeader extends StatelessWidget {
               child: Container(
                 width: 40,
                 height: 40,
-                decoration: BoxDecoration(color: c.surface, shape: BoxShape.circle),
-                child: Icon(Icons.arrow_back_rounded,
-                    size: 20, color: c.text, semanticLabel: 'Back'),
+                decoration: BoxDecoration(
+                  color: c.surface,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.arrow_back_rounded,
+                  size: 20,
+                  color: c.text,
+                  semanticLabel: 'Back',
+                ),
               ),
             ),
             const SizedBox(width: 12),
@@ -60,7 +67,10 @@ class SwapHeader extends StatelessWidget {
                     subtitle!,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.manrope(fontSize: 12.5, color: c.textMuted),
+                    style: GoogleFonts.manrope(
+                      fontSize: 12.5,
+                      color: c.textMuted,
+                    ),
                   ),
                 ],
               ],
@@ -168,7 +178,10 @@ class SlimRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle!,
-                      style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted),
+                      style: GoogleFonts.manrope(
+                        fontSize: 12,
+                        color: c.textMuted,
+                      ),
                     ),
                   ],
                 ],
@@ -208,7 +221,12 @@ class PillButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.sw;
     final bg = color ?? c.cta;
-    final fg = foreground ?? (color == null ? c.onCta : Colors.white);
+    final disabled = onTap == null && !loading;
+    // A disabled pill sits on the pale surfaceLow colour, so its label must
+    // switch to a dark muted tone or it all but disappears.
+    final fg = disabled
+        ? c.textMuted
+        : foreground ?? (color == null ? c.onCta : Colors.white);
     return Pressable(
       onTap: loading ? null : onTap,
       child: Container(
@@ -287,18 +305,27 @@ class SwapEmptyState extends StatelessWidget {
             else
               HexTile(icon: icon, size: 92, accent: accent),
             const SizedBox(height: 22),
-            Text(title,
-                textAlign: TextAlign.center,
-                style: AppTheme.display(fontSize: 22, color: c.text)),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: AppTheme.display(fontSize: 22, color: c.text),
+            ),
             const SizedBox(height: 8),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: GoogleFonts.manrope(fontSize: 13.5, color: c.textMuted, height: 1.45),
+              style: GoogleFonts.manrope(
+                fontSize: 13.5,
+                color: c.textMuted,
+                height: 1.45,
+              ),
             ),
             if (actionLabel != null && onAction != null) ...[
               const SizedBox(height: 22),
-              SizedBox(width: 220, child: PillButton(label: actionLabel!, onTap: onAction)),
+              SizedBox(
+                width: 220,
+                child: PillButton(label: actionLabel!, onTap: onAction),
+              ),
             ],
           ],
         ),
@@ -321,8 +348,10 @@ class KitSection extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(label.toUpperCase(),
-                style: AppTheme.label(color: context.sw.textMuted)),
+            child: Text(
+              label.toUpperCase(),
+              style: AppTheme.label(color: context.sw.textMuted),
+            ),
           ),
           if (trailing != null) trailing!,
         ],

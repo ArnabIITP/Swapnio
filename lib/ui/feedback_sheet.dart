@@ -36,7 +36,8 @@ Future<void> showFeedbackDialog(BuildContext context) async {
                   itemSize: 30,
                   itemBuilder: (context, _) =>
                       Icon(Icons.star, color: dialogContext.sw.give),
-                  onRatingUpdate: (value) => setDialogState(() => rating = value),
+                  onRatingUpdate: (value) =>
+                      setDialogState(() => rating = value),
                 ),
               ),
               const SizedBox(height: 14),
@@ -82,9 +83,11 @@ Future<void> showFeedbackDialog(BuildContext context) async {
   );
   messenger.showSnackBar(
     SnackBar(
-      content: Text(ok
-          ? 'Thanks for the feedback!'
-          : 'Could not send feedback. Please try again.'),
+      content: Text(
+        ok
+            ? 'Thanks for the feedback!'
+            : 'Could not send feedback. Please try again.',
+      ),
       backgroundColor: ok ? null : Colors.redAccent,
     ),
   );
