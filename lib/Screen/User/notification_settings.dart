@@ -9,7 +9,8 @@ class NotificationSettingsPage extends StatefulWidget {
   const NotificationSettingsPage({super.key});
 
   @override
-  State<NotificationSettingsPage> createState() => _NotificationSettingsPageState();
+  State<NotificationSettingsPage> createState() =>
+      _NotificationSettingsPageState();
 }
 
 class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
@@ -30,7 +31,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
 
   Future<void> _loadNotificationSettings() async {
     setState(() => _isLoading = true);
-    
+
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception("No logged in user");
@@ -40,9 +41,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
           .doc(user.uid)
           .collection('settings')
           .doc('notifications');
-      
+
       final doc = await docRef.get();
-      
+
       if (doc.exists) {
         setState(() {
           _notificationSettings = {
@@ -55,9 +56,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         });
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading settings: $e'))
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error loading settings: $e')));
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -67,7 +68,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
 
   Future<void> _saveNotificationSettings() async {
     setState(() => _isLoading = true);
-    
+
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception("No logged in user");
@@ -78,14 +79,14 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
           .collection('settings')
           .doc('notifications')
           .set(_notificationSettings, SetOptions(merge: true));
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Notification settings saved'))
+        const SnackBar(content: Text('Notification settings saved')),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving settings: $e'))
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error saving settings: $e')));
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -102,106 +103,115 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SwapHeader(title: 'Notifications', subtitle: 'Choose what Swapnio may ping you about'),
-            Expanded(child: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                const SizedBox(height: 8),
-                _buildInfoCard(),
-                const SizedBox(height: 28),
-                _buildSettingSwitch(
-                  title: 'New Matches',
-                  subtitle: 'Get notified when you match with someone',
-                  value: _notificationSettings['newMatches'],
-                  onChanged: (value) {
-                    setState(() {
-                      _notificationSettings['newMatches'] = value;
-                    });
-                  },
-                ),
-                _buildSettingSwitch(
-                  title: 'Messages',
-                  subtitle: 'Receive notifications for new messages',
-                  value: _notificationSettings['messages'],
-                  onChanged: (value) {
-                    setState(() {
-                      _notificationSettings['messages'] = value;
-                    });
-                  },
-                ),
-                _buildSettingSwitch(
-                  title: 'Skill Requests',
-                  subtitle: 'Get notified when someone requests your skills',
-                  value: _notificationSettings['skillRequests'],
-                  onChanged: (value) {
-                    setState(() {
-                      _notificationSettings['skillRequests'] = value;
-                    });
-                  },
-                ),
-                _buildSettingSwitch(
-                  title: 'Skill Updates',
-                  subtitle: 'Get notified about new skills in your area',
-                  value: _notificationSettings['skillUpdates'],
-                  onChanged: (value) {
-                    setState(() {
-                      _notificationSettings['skillUpdates'] = value;
-                    });
-                  },
-                ),
-                _buildSettingSwitch(
-                  title: 'App Updates',
-                  subtitle: 'Stay informed about new app features',
-                  value: _notificationSettings['appUpdates'],
-                  onChanged: (value) {
-                    setState(() {
-                      _notificationSettings['appUpdates'] = value;
-                    });
-                  },
-                ),
-                const SizedBox(height: 28),
-                PillButton(label: 'Save Changes', onTap: _saveNotificationSettings),
-              ],
+            SwapHeader(
+              title: 'Notifications',
+              subtitle: 'Choose what Swapnio may ping you about',
             ),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : ListView(
+                      padding: const EdgeInsets.all(20),
+                      children: [
+                        const SizedBox(height: 8),
+                        _buildInfoCard(),
+                        const SizedBox(height: 28),
+                        _buildSettingSwitch(
+                          title: 'New Matches',
+                          subtitle: 'Get notified when you match with someone',
+                          value: _notificationSettings['newMatches'],
+                          onChanged: (value) {
+                            setState(() {
+                              _notificationSettings['newMatches'] = value;
+                            });
+                          },
+                        ),
+                        _buildSettingSwitch(
+                          title: 'Messages',
+                          subtitle: 'Receive notifications for new messages',
+                          value: _notificationSettings['messages'],
+                          onChanged: (value) {
+                            setState(() {
+                              _notificationSettings['messages'] = value;
+                            });
+                          },
+                        ),
+                        _buildSettingSwitch(
+                          title: 'Skill Requests',
+                          subtitle:
+                              'Get notified when someone requests your skills',
+                          value: _notificationSettings['skillRequests'],
+                          onChanged: (value) {
+                            setState(() {
+                              _notificationSettings['skillRequests'] = value;
+                            });
+                          },
+                        ),
+                        _buildSettingSwitch(
+                          title: 'Skill Updates',
+                          subtitle:
+                              'Get notified about new skills in your area',
+                          value: _notificationSettings['skillUpdates'],
+                          onChanged: (value) {
+                            setState(() {
+                              _notificationSettings['skillUpdates'] = value;
+                            });
+                          },
+                        ),
+                        _buildSettingSwitch(
+                          title: 'App Updates',
+                          subtitle: 'Stay informed about new app features',
+                          value: _notificationSettings['appUpdates'],
+                          onChanged: (value) {
+                            setState(() {
+                              _notificationSettings['appUpdates'] = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 28),
+                        PillButton(
+                          label: 'Save Changes',
+                          onTap: _saveNotificationSettings,
+                        ),
+                      ],
+                    ),
             ),
           ],
         ),
       ),
     );
   }
-  
+
   Widget _buildInfoCard() {
     return SurfaceCard(
       padding: const EdgeInsets.all(20),
       child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.notifications, color: context.sw.give, size: 28),
-                const SizedBox(width: 10),
-                Text(
-                  'Notification Preferences',
-                  style: TextStyle(
-                    fontSize: 19,
-                    fontWeight: FontWeight.bold,
-                    color: context.sw.text,
-                  ),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.notifications, color: context.sw.give, size: 28),
+              const SizedBox(width: 10),
+              Text(
+                'Notification Preferences',
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                  color: context.sw.text,
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Control which notifications you receive from Swapnio. You can toggle each type of notification on or off.',
-              style: TextStyle(fontSize: 15, color: context.sw.textMuted),
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Control which notifications you receive from Swapnio. You can toggle each type of notification on or off.',
+            style: TextStyle(fontSize: 15, color: context.sw.textMuted),
+          ),
+        ],
+      ),
     );
   }
-  
+
   Widget _buildSettingSwitch({
     required String title,
     required String subtitle,
@@ -232,7 +242,10 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   const SizedBox(height: 3),
                   Text(
                     subtitle,
-                    style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted),
+                    style: GoogleFonts.manrope(
+                      fontSize: 12,
+                      color: c.textMuted,
+                    ),
                   ),
                 ],
               ),
@@ -252,5 +265,4 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
       ),
     );
   }
-
 }

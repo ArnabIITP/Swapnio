@@ -10,8 +10,9 @@ import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../providers/app_state.dart';
+import '../../ui/propose_session_sheet.dart';
+import '../../ui/session_chat_card.dart';
 import '../../services/chat_service.dart';
-import '../../services/google_calendar_service.dart';
 import '../../services/swap_service.dart';
 import '../../theme.dart';
 import '../../ui/swapnio_widgets.dart';
@@ -42,7 +43,6 @@ class _ChatPageState extends State<ChatPage> {
   bool _showRatingDialog = false;
   double _rating = 0;
   bool _sendFailed = false;
-  String _failedText = '';
   String? _completedSwapId;
   final TextEditingController _reviewController = TextEditingController();
   final Set<String> _selectedFeedbackTags = {};
@@ -230,7 +230,6 @@ class _ChatPageState extends State<ChatPage> {
       }
       setState(() {
         _sendFailed = true;
-        _failedText = messageText;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -345,11 +344,17 @@ class _ChatPageState extends State<ChatPage> {
         titleSpacing: 0,
         title: Row(
           children: [
-            SwapAvatar(
-              name: widget.otherUserName,
-              photoUrl: widget.otherUserPhoto,
-              size: 40,
-              radius: 14,
+            FutureBuilder<DocumentSnapshot>(
+              future: _otherUserFuture,
+              builder: (context, snap) => SwapAvatar(
+                name: widget.otherUserName,
+                photoUrl: widget.otherUserPhoto,
+                size: 40,
+                radius: 14,
+                verified:
+                    (snap.data?.data() as Map<String, dynamic>?)?['verified'] ==
+                    true,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -368,19 +373,14 @@ class _ChatPageState extends State<ChatPage> {
         ),
         actions: [
           IconButton(
-            icon: Icon(
-              Icons.event_available,
-              color: context.sw.give,
-            ),
+            icon: Icon(Icons.event_available, color: context.sw.give),
             tooltip: 'Propose swap session',
             onPressed: _showProposeSessionDialog,
           ),
           IconButton(
             icon: Icon(
               Icons.star_rate,
-              color: _completedSwapId == null
-                  ? Colors.grey
-                  : context.sw.give,
+              color: _completedSwapId == null ? Colors.grey : context.sw.give,
             ),
             tooltip: _completedSwapId == null
                 ? 'Complete a swap session to unlock ratings'
@@ -434,7 +434,11 @@ class _ChatPageState extends State<ChatPage> {
                 value: 'unmatch',
                 child: Row(
                   children: [
-                    Icon(Icons.heart_broken_outlined, size: 18, color: Colors.redAccent),
+                    Icon(
+                      Icons.heart_broken_outlined,
+                      size: 18,
+                      color: Colors.redAccent,
+                    ),
                     SizedBox(width: 10),
                     Text('Unmatch', style: TextStyle(color: Colors.redAccent)),
                   ],
@@ -486,7 +490,6 @@ class _ChatPageState extends State<ChatPage> {
                 onTap: () {
                   setState(() {
                     _sendFailed = false;
-                    _failedText = '';
                   });
                   _sendMessage();
                 },
@@ -534,19 +537,28 @@ class _ChatPageState extends State<ChatPage> {
               if (room['unmatched'] == true) {
                 return Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   color: Theme.of(context).colorScheme.surface,
                   child: SafeArea(
                     top: false,
                     child: Row(
                       children: [
-                        Icon(Icons.heart_broken_outlined,
-                            size: 18, color: context.sw.textMuted),
+                        Icon(
+                          Icons.heart_broken_outlined,
+                          size: 18,
+                          color: context.sw.textMuted,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'You unmatched - you can no longer message each other.',
-                            style: TextStyle(fontSize: 13, color: context.sw.textMuted),
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: context.sw.textMuted,
+                            ),
                           ),
                         ),
                       ],
@@ -587,7 +599,9 @@ class _ChatPageState extends State<ChatPage> {
                               borderSide: BorderSide.none,
                             ),
                             filled: true,
-                            fillColor: Theme.of(context).scaffoldBackgroundColor,
+                            fillColor: Theme.of(
+                              context,
+                            ).scaffoldBackgroundColor,
                           ),
                           style: TextStyle(
                             fontSize: 15,
@@ -607,8 +621,11 @@ class _ChatPageState extends State<ChatPage> {
                             color: context.sw.give,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.arrow_upward_rounded,
-                              color: Colors.white, semanticLabel: 'Send'),
+                          child: const Icon(
+                            Icons.arrow_upward_rounded,
+                            color: Colors.white,
+                            semanticLabel: 'Send',
+                          ),
                         ),
                       ),
                     ],
@@ -697,223 +714,19 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
 
-    final offeredController = TextEditingController();
-    final wantedController = TextEditingController();
-    final agendaController = TextEditingController();
-    DateTime scheduled = DateTime.now().add(const Duration(days: 1));
-
-    // Google-auth accounts usually already have a cached Google session on
-    // this device, so calendar access can be picked up without a prompt.
-    // Email/password accounts fall through to the "Connect" button below.
-    bool calendarConnected = await GoogleCalendarService.instance.ensureConnected();
-    bool connectingCalendar = false;
-
-    final proposed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Propose a swap session'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: offeredController,
-                  decoration: const InputDecoration(
-                    labelText: 'What will you teach?',
-                    hintText: 'e.g. Intro to Flutter',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: wantedController,
-                  decoration: const InputDecoration(
-                    labelText: 'What do you want to learn?',
-                    hintText: 'e.g. Guitar basics',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.event,
-                      size: 18,
-                      color: dialogContext.sw.give,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        DateFormat.yMMMd().add_jm().format(scheduled),
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        final date = await showDatePicker(
-                          context: context,
-                          initialDate: scheduled,
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime.now().add(
-                            const Duration(days: 365),
-                          ),
-                        );
-                        if (date == null) return;
-                        final time = await showTimePicker(
-                          context: context,
-                          initialTime: TimeOfDay.fromDateTime(scheduled),
-                        );
-                        if (time == null) return;
-                        setDialogState(() {
-                          scheduled = DateTime(
-                            date.year,
-                            date.month,
-                            date.day,
-                            time.hour,
-                            time.minute,
-                          );
-                        });
-                      },
-                      child: const Text('Change'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                if (calendarConnected)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: dialogContext.sw.give.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.check_circle, size: 18, color: dialogContext.sw.give),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Google Calendar connected - a Meet link and calendar '
-                            'invite will be created automatically.',
-                            style: TextStyle(fontSize: 12.5, color: dialogContext.sw.give),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton.icon(
-                      onPressed: connectingCalendar
-                          ? null
-                          : () async {
-                              setDialogState(() => connectingCalendar = true);
-                              final ok = await GoogleCalendarService.instance.connect();
-                              setDialogState(() {
-                                calendarConnected = ok;
-                                connectingCalendar = false;
-                              });
-                              if (!ok && context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Could not connect Google Calendar. You can still '
-                                      'propose the session without a meeting link.',
-                                    ),
-                                  ),
-                                );
-                              }
-                            },
-                      icon: connectingCalendar
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.calendar_month, size: 16),
-                      label: Text(
-                        connectingCalendar ? 'Connecting...' : 'Connect Google Calendar',
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: dialogContext.sw.give,
-                        side: BorderSide(color: dialogContext.sw.give),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: agendaController,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Agenda (optional)',
-                    hintText: 'What do you want to cover in this session?',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Propose'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (proposed != true) return;
-
-    final offered = offeredController.text.trim();
-    final wanted = wantedController.text.trim();
-    if (offered.isEmpty || wanted.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please describe both skills')),
-      );
-      return;
-    }
-
     final messenger = ScaffoldMessenger.of(context);
-    final agenda = agendaController.text.trim();
-
-    // Only attempt event creation if calendar access is actually connected -
-    // otherwise the session still gets proposed, just without a meeting link.
-    String meetingLink = '';
-    if (calendarConnected) {
-      meetingLink = await GoogleCalendarService.instance.createSwapEvent(
-            title: 'Swapnio swap session with ${widget.otherUserName}',
-            start: scheduled,
-            description: agenda.isEmpty ? 'Swap session arranged via Swapnio.' : agenda,
-          ) ??
-          '';
-    }
-
-    final ok = await SwapSessionService.instance.proposeSession(
+    final sent = await showProposeSessionSheet(
+      context,
       otherUserId: widget.otherUserId,
-      otherUserName: widget.otherUserName,
-      myName: currentUser?.displayName ?? 'Swapnio user',
-      skillOffered: offered,
-      skillWanted: wanted,
-      scheduledFor: scheduled,
-      meetingLink: meetingLink,
-      agenda: agenda,
+      otherName: widget.otherUserName,
     );
+    if (!sent || !mounted) return;
     messenger.showSnackBar(
       SnackBar(
-        content: Text(
-          !ok
-              ? 'Could not propose the session. Please try again.'
-              : calendarConnected && meetingLink.isEmpty
-                  ? 'Session proposed, but the Meet link could not be created - '
-                      'you can add one later from the session details.'
-                  : 'Session proposed - they can accept it from the Requests tab',
+        content: const Text(
+          'Session proposed - they can accept it from the Requests tab',
         ),
-        backgroundColor: ok ? context.sw.give : Colors.redAccent,
+        backgroundColor: context.sw.give,
       ),
     );
   }
@@ -930,8 +743,10 @@ class _ChatPageState extends State<ChatPage> {
         final theyTeach = List<String>.from(other?['skillsOffered'] ?? []);
         final theyWant = List<String>.from(other?['skillsWanted'] ?? []);
         final me = Provider.of<AppState>(context, listen: false).currentUser;
-        final myWant = me?.skillsWanted.map((e) => e.toLowerCase()).toSet() ?? <String>{};
-        final myTeach = me?.skillsOffered.map((e) => e.toLowerCase()).toSet() ?? <String>{};
+        final myWant =
+            me?.skillsWanted.map((e) => e.toLowerCase()).toSet() ?? <String>{};
+        final myTeach =
+            me?.skillsOffered.map((e) => e.toLowerCase()).toSet() ?? <String>{};
 
         String pick(List<String> theirs, Set<String> mine) {
           for (final skill in theirs) {
@@ -981,7 +796,11 @@ class _ChatPageState extends State<ChatPage> {
               Text(
                 'Tap a question to fill it in - you can edit it before sending.',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.manrope(fontSize: 13, color: c.textMuted, height: 1.4),
+                style: GoogleFonts.manrope(
+                  fontSize: 13,
+                  color: c.textMuted,
+                  height: 1.4,
+                ),
               ),
               if (youGet.isNotEmpty || youGive.isNotEmpty) ...[
                 const SizedBox(height: 18),
@@ -1005,7 +824,10 @@ class _ChatPageState extends State<ChatPage> {
                       _messageFocusNode.requestFocus();
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                       decoration: BoxDecoration(
                         color: c.surface,
                         borderRadius: const BorderRadius.only(
@@ -1017,11 +839,20 @@ class _ChatPageState extends State<ChatPage> {
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.auto_awesome_rounded, size: 14, color: c.give),
+                          Icon(
+                            Icons.auto_awesome_rounded,
+                            size: 14,
+                            color: c.give,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Text(opener,
-                                style: GoogleFonts.manrope(fontSize: 13, color: c.text)),
+                            child: Text(
+                              opener,
+                              style: GoogleFonts.manrope(
+                                fontSize: 13,
+                                color: c.text,
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -1167,6 +998,12 @@ class _ChatPageState extends State<ChatPage> {
             Widget bubble;
             if (messageType == 'system' || messageType == 'rating') {
               bubble = _buildSystemMessage(message);
+            } else if (messageType == 'session' &&
+                (message['swapId'] as String?)?.isNotEmpty == true) {
+              bubble = SessionChatCard(
+                swapId: message['swapId'] as String,
+                mine: isCurrentUser,
+              );
             } else {
               final seen =
                   i == lastMineIndex &&
@@ -1731,9 +1568,7 @@ class _TypingDotsState extends State<_TypingDots>
                 width: 6,
                 height: 6,
                 decoration: BoxDecoration(
-                  color: context.sw.give.withValues(
-                    alpha: 0.45 + 0.55 * lift,
-                  ),
+                  color: context.sw.give.withValues(alpha: 0.45 + 0.55 * lift),
                   shape: BoxShape.circle,
                 ),
               ),

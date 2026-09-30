@@ -25,12 +25,15 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../../features/streak/daily_streak.dart';
 import '../../providers/app_state.dart';
+import '../../providers/user_data_provider.dart';
 import '../../theme.dart';
 import '../../ui/fade_slide_in.dart';
 import '../../ui/session_actions.dart';
 import '../../ui/swapnio_kit.dart';
 import '../../ui/swapnio_widgets.dart';
+import 'calendar_settings_page.dart';
 import 'chat_page.dart';
 import 'notifications_page.dart';
 import 'session_detail.dart';
@@ -86,30 +89,30 @@ class _HomeDashboardState extends State<HomeDashboard> {
         .where('status', isEqualTo: 'accepted')
         .snapshots()
         .listen((snap) {
-      if (mounted) setState(() => _acceptedSnapshot = snap);
-    });
+          if (mounted) setState(() => _acceptedSnapshot = snap);
+        });
     _likesSub = db
         .collection('swipeRequests')
         .where('toUserId', isEqualTo: uid)
         .snapshots()
         .listen((snap) {
-      if (mounted) setState(() => _likesSnapshot = snap);
-    });
+          if (mounted) setState(() => _likesSnapshot = snap);
+        });
     _chatRoomsSub = db
         .collection('chatRooms')
         .where('users', arrayContains: uid)
         .snapshots()
         .listen((snap) {
-      if (mounted) setState(() => _chatRoomsSnapshot = snap);
-    });
+          if (mounted) setState(() => _chatRoomsSnapshot = snap);
+        });
     _completedSub = db
         .collection('swaps')
         .where('participants', arrayContains: uid)
         .where('status', isEqualTo: 'completed')
         .snapshots()
         .listen((snap) {
-      if (mounted) setState(() => _completedSnapshot = snap);
-    });
+          if (mounted) setState(() => _completedSnapshot = snap);
+        });
     _loadFutures();
   }
 
@@ -127,9 +130,12 @@ class _HomeDashboardState extends State<HomeDashboard> {
     _profileViewsFuture = db
         .collection('profileViews')
         .where('viewedUserId', isEqualTo: _uid)
-        .where('timestamp',
-            isGreaterThanOrEqualTo:
-                Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 7))))
+        .where(
+          'timestamp',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(
+            DateTime.now().subtract(const Duration(days: 7)),
+          ),
+        )
         .get();
     _myProfileFuture = db.collection('users').doc(_uid).get();
     // Reads a counter the badgeOnCompletedSwap function maintains, rather
@@ -161,44 +167,122 @@ class _HomeDashboardState extends State<HomeDashboard> {
         child: RefreshIndicator(
           color: c.give,
           onRefresh: () async => setState(_loadFutures),
-          child: Builder(builder: (context) {
-            final completed = _completedSnapshot?.docs ?? const [];
-            return ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              children: [
-                FadeSlideIn(child: _buildHeader()),
-                const SizedBox(height: 18),
-                FadeSlideIn(
-                  delay: const Duration(milliseconds: 80),
-                  child: _buildWeekStrip(completed),
-                ),
-                const SizedBox(height: 22),
-                FadeSlideIn(
-                  delay: const Duration(milliseconds: 160),
-                  child: _buildHero(),
-                ),
-                const SizedBox(height: 26),
-                const SectionLabel('More for today'),
-                const SizedBox(height: 12),
-                FadeSlideIn(
-                  delay: const Duration(milliseconds: 240),
-                  child: _buildTiles(completed),
-                ),
-                const SizedBox(height: 14),
-                _buildProfileViews(),
-                _buildReciprocityNudge(completed),
-                const SizedBox(height: 6),
-                _buildCommunityPulse(),
-              ],
-            );
-          }),
+          child: Builder(
+            builder: (context) {
+              final completed = _completedSnapshot?.docs ?? const [];
+              return ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                children: [
+                  FadeSlideIn(child: _buildHeader()),
+                  const SizedBox(height: 18),
+                  _buildCalendarWarning(),
+                  FadeSlideIn(
+                    delay: const Duration(milliseconds: 80),
+                    child: _buildWeekStrip(completed),
+                  ),
+                  const SizedBox(height: 22),
+                  FadeSlideIn(
+                    delay: const Duration(milliseconds: 160),
+                    child: _buildHero(),
+                  ),
+                  const SizedBox(height: 26),
+                  const SectionLabel('More for today'),
+                  const SizedBox(height: 12),
+                  FadeSlideIn(
+                    delay: const Duration(milliseconds: 240),
+                    child: _buildTiles(completed),
+                  ),
+                  const SizedBox(height: 14),
+                  _buildProfileViews(),
+                  _buildReciprocityNudge(completed),
+                  const SizedBox(height: 6),
+                  _buildCommunityPulse(),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
   }
 
   // ---------------------------------------------------------------- header
+
+  /// Stays on Home until Google Calendar is connected - booking a session
+  /// needs it for both people (Meet link, invites, no double-booking).
+  Widget _buildCalendarWarning() {
+    final data = context.watch<UserDataProvider>().userData;
+    if (data == null || data['calendarConnected'] == true) {
+      return const SizedBox.shrink();
+    }
+    final c = context.sw;
+    const amber = Color(0xFFC08A1E);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Pressable(
+        onTap: () => _push(const CalendarSettingsPage()),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+          decoration: BoxDecoration(
+            color: amber.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: amber.withValues(alpha: 0.45)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: amber, size: 26),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Connect Google Calendar',
+                      style: GoogleFonts.manrope(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: c.text,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      "You can't book or accept sessions until you do - it adds the "
+                      'Meet link and calendar invites, and stops double-booking.',
+                      style: GoogleFonts.manrope(
+                        fontSize: 12.5,
+                        height: 1.4,
+                        color: c.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: c.cta,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'Connect',
+                  style: GoogleFonts.manrope(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    color: c.onCta,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _buildHeader() {
     final c = context.sw;
@@ -215,8 +299,10 @@ class _HomeDashboardState extends State<HomeDashboard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_greeting(),
-                  style: GoogleFonts.manrope(fontSize: 13.5, color: c.textMuted)),
+              Text(
+                _greeting(),
+                style: GoogleFonts.manrope(fontSize: 13.5, color: c.textMuted),
+              ),
               const SizedBox(height: 2),
               Text(
                 firstName.isEmpty ? 'Welcome' : firstName,
@@ -227,6 +313,8 @@ class _HomeDashboardState extends State<HomeDashboard> {
             ],
           ),
         ),
+        const StreakFlame(),
+        const SizedBox(width: 10),
         Semantics(
           label: 'Notifications',
           button: true,
@@ -238,16 +326,29 @@ class _HomeDashboardState extends State<HomeDashboard> {
                 Container(
                   width: 44,
                   height: 44,
-                  decoration: BoxDecoration(color: c.surface, shape: BoxShape.circle),
-                  child: Icon(Icons.notifications_none_rounded, color: c.text, size: 22),
+                  decoration: BoxDecoration(
+                    color: c.surface,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.notifications_none_rounded,
+                    color: c.text,
+                    size: 22,
+                  ),
                 ),
                 if (unread > 0)
                   Positioned(
                     right: 0,
                     top: 0,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                      constraints: const BoxConstraints(minWidth: 17, minHeight: 17),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 1,
+                      ),
+                      constraints: const BoxConstraints(
+                        minWidth: 17,
+                        minHeight: 17,
+                      ),
                       decoration: BoxDecoration(
                         color: c.give,
                         borderRadius: BorderRadius.circular(9),
@@ -257,7 +358,10 @@ class _HomeDashboardState extends State<HomeDashboard> {
                         unread > 9 ? '9+' : '$unread',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                            color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
@@ -273,6 +377,8 @@ class _HomeDashboardState extends State<HomeDashboard> {
             photoUrl: user?.photoUrl,
             size: 44,
             radius: 22,
+            verified:
+                context.watch<UserDataProvider>().userData?['verified'] == true,
           ),
         ),
       ],
@@ -281,8 +387,9 @@ class _HomeDashboardState extends State<HomeDashboard> {
 
   // ----------------------------------------------------------- week strip
 
-  /// Weekly rhythm rather than daily streaks: swaps happen on a weekly
-  /// cadence, so a daily streak would punish completely normal behaviour.
+  /// Sessions this week. Swaps happen on a weekly cadence, so sessions get
+  /// a weekly rhythm; the daily streak (the flame in the header) counts any
+  /// real activity instead.
   Widget _buildWeekStrip(List<QueryDocumentSnapshot> completed) {
     final c = context.sw;
     final now = DateTime.now();
@@ -311,8 +418,8 @@ class _HomeDashboardState extends State<HomeDashboard> {
                 color: doneDays.contains(i)
                     ? c.give
                     : i == today.weekday - 1
-                        ? c.ink
-                        : c.surfaceLow,
+                    ? c.ink
+                    : c.surfaceLow,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
@@ -331,7 +438,11 @@ class _HomeDashboardState extends State<HomeDashboard> {
         ],
         Text(
           count == 0 ? 'None yet' : '$count this week',
-          style: GoogleFonts.manrope(fontSize: 11.5, fontWeight: FontWeight.w800, color: c.text),
+          style: GoogleFonts.manrope(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w800,
+            color: c.text,
+          ),
         ),
       ],
     );
@@ -374,7 +485,8 @@ class _HomeDashboardState extends State<HomeDashboard> {
   List<QueryDocumentSnapshot> _unreadRooms(List<QueryDocumentSnapshot> rooms) =>
       rooms.where((doc) {
         final counts = Map<String, dynamic>.from(
-            (doc.data() as Map<String, dynamic>)['unreadCount'] ?? {});
+          (doc.data() as Map<String, dynamic>)['unreadCount'] ?? {},
+        );
         return ((counts[_uid] as num?)?.toInt() ?? 0) > 0;
       }).toList();
 
@@ -409,7 +521,10 @@ class _HomeDashboardState extends State<HomeDashboard> {
     final c = context.sw;
     return Container(
       padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(color: c.ink, borderRadius: BorderRadius.circular(28)),
+      decoration: BoxDecoration(
+        color: c.ink,
+        borderRadius: BorderRadius.circular(28),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -418,13 +533,22 @@ class _HomeDashboardState extends State<HomeDashboard> {
               Icon(eyebrowIcon, size: 14, color: c.win),
               const SizedBox(width: 6),
               Flexible(
-                child: Text(eyebrow.toUpperCase(), style: AppTheme.label(color: c.win)),
+                child: Text(
+                  eyebrow.toUpperCase(),
+                  style: AppTheme.label(color: c.win),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          Text(headline,
-              style: AppTheme.display(fontSize: 27, color: Colors.white, height: 1.12)),
+          Text(
+            headline,
+            style: AppTheme.display(
+              fontSize: 27,
+              color: Colors.white,
+              height: 1.12,
+            ),
+          ),
           if (body != null && body.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
@@ -432,7 +556,10 @@ class _HomeDashboardState extends State<HomeDashboard> {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: GoogleFonts.manrope(
-                  fontSize: 13.5, color: Colors.white.withValues(alpha: 0.72), height: 1.4),
+                fontSize: 13.5,
+                color: Colors.white.withValues(alpha: 0.72),
+                height: 1.4,
+              ),
             ),
           ],
           if (middle != null) ...[const SizedBox(height: 16), middle],
@@ -445,11 +572,18 @@ class _HomeDashboardState extends State<HomeDashboard> {
                   child: Container(
                     height: 52,
                     alignment: Alignment.center,
-                    decoration:
-                        BoxDecoration(color: c.win, borderRadius: BorderRadius.circular(16)),
-                    child: Text(cta,
-                        style: GoogleFonts.manrope(
-                            fontSize: 15, fontWeight: FontWeight.w800, color: c.onWin)),
+                    decoration: BoxDecoration(
+                      color: c.win,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      cta,
+                      style: GoogleFonts.manrope(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: c.onWin,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -465,9 +599,14 @@ class _HomeDashboardState extends State<HomeDashboard> {
                       color: Colors.white.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    child: Text(secondary,
-                        style: GoogleFonts.manrope(
-                            fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white)),
+                    child: Text(
+                      secondary,
+                      style: GoogleFonts.manrope(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -481,21 +620,23 @@ class _HomeDashboardState extends State<HomeDashboard> {
   Widget _sessionHero(DocumentSnapshot doc, DateTime when) {
     final data = doc.data() as Map<String, dynamic>;
     final names = Map<String, dynamic>.from(data['participantNames'] ?? {});
-    final otherId = List<String>.from(data['participants'] ?? [])
-        .firstWhere((p) => p != _uid, orElse: () => '');
+    final otherId = List<String>.from(
+      data['participants'] ?? [],
+    ).firstWhere((p) => p != _uid, orElse: () => '');
     final otherName = (names[otherId] as String?) ?? 'your partner';
     final link = (data['meetingLink'] as String?)?.trim() ?? '';
     final sides = swapSidesFor(data, _uid);
     final now = DateTime.now();
     final diff = when.difference(now);
-    final sameDay = when.year == now.year && when.month == now.month && when.day == now.day;
+    final sameDay =
+        when.year == now.year && when.month == now.month && when.day == now.day;
     final eyebrow = diff.isNegative
         ? 'Happening now'
         : diff.inMinutes < 60
-            ? 'Live in ${diff.inMinutes} min'
-            : sameDay
-                ? 'Today · ${DateFormat.jm().format(when)}'
-                : '${DateFormat.MMMEd().format(when)} · ${DateFormat.jm().format(when)}';
+        ? 'Live in ${diff.inMinutes} min'
+        : sameDay
+        ? 'Today · ${DateFormat.jm().format(when)}'
+        : '${DateFormat.MMMEd().format(when)} · ${DateFormat.jm().format(when)}';
     final topic = sides.myGet.isNotEmpty ? sides.myGet : sides.myGive;
     void openDetail() => _push(SessionDetailPage(swapId: doc.id));
 
@@ -507,22 +648,24 @@ class _HomeDashboardState extends State<HomeDashboard> {
           : '$topic with ${otherName.split(' ').first}',
       middle: SwapSplit(giveSkill: sides.myGive, getSkill: sides.myGet),
       cta: link.isNotEmpty ? 'Join session' : 'View session',
-      onCta: link.isNotEmpty ? () => copyMeetingLink(context, link) : openDetail,
+      onCta: link.isNotEmpty
+          ? () => copyMeetingLink(context, link)
+          : openDetail,
       secondary: link.isNotEmpty ? 'Details' : null,
       onSecondary: openDetail,
     );
   }
 
   Widget _likesHero(int count) => _heroShell(
-        eyebrowIcon: Icons.favorite_rounded,
-        eyebrow: 'Waiting on you',
-        headline: count == 1
-            ? '1 person wants to swap with you'
-            : '$count people want to swap with you',
-        body: 'They already liked your profile. Reply before they move on.',
-        cta: 'Review requests',
-        onCta: () => widget.onNavigateToTab?.call(2),
-      );
+    eyebrowIcon: Icons.favorite_rounded,
+    eyebrow: 'Waiting on you',
+    headline: count == 1
+        ? '1 person wants to swap with you'
+        : '$count people want to swap with you',
+    body: 'They already liked your profile. Reply before they move on.',
+    cta: 'Review requests',
+    onCta: () => widget.onNavigateToTab?.call(2),
+  );
 
   Widget _chatHero(List<QueryDocumentSnapshot> rooms) {
     final data = rooms.first.data() as Map<String, dynamic>;
@@ -533,52 +676,56 @@ class _HomeDashboardState extends State<HomeDashboard> {
     final otherName = (names[otherId] as String?) ?? 'Someone';
     return _heroShell(
       eyebrowIcon: Icons.mark_chat_unread_rounded,
-      eyebrow: rooms.length == 1 ? 'New message' : '${rooms.length} chats unread',
+      eyebrow: rooms.length == 1
+          ? 'New message'
+          : '${rooms.length} chats unread',
       headline: '${otherName.split(' ').first} replied',
       body: (data['lastMessage'] as String?) ?? '',
       cta: 'Open chat',
-      onCta: () => _push(ChatPage(
-        chatRoomId: rooms.first.id,
-        otherUserName: otherName,
-        otherUserPhoto: (photos[otherId] as String?) ?? '',
-        otherUserId: otherId,
-      )),
+      onCta: () => _push(
+        ChatPage(
+          chatRoomId: rooms.first.id,
+          otherUserName: otherName,
+          otherUserPhoto: (photos[otherId] as String?) ?? '',
+          otherUserId: otherId,
+        ),
+      ),
       secondary: rooms.length > 1 ? 'All' : null,
       onSecondary: () => widget.onNavigateToTab?.call(2),
     );
   }
 
   Widget _profileHero(double progress, String missing) => _heroShell(
-        eyebrowIcon: Icons.bolt_rounded,
-        eyebrow: '${(progress * 100).round()}% done',
-        headline: 'Finish your profile',
-        body: 'Add $missing - complete profiles get far more matches.',
-        middle: ClipRRect(
-          borderRadius: BorderRadius.circular(6),
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: progress),
-            duration: const Duration(milliseconds: 900),
-            curve: Curves.easeOutCubic,
-            builder: (context, v, _) => LinearProgressIndicator(
-              value: v,
-              minHeight: 10,
-              backgroundColor: Colors.white.withValues(alpha: 0.15),
-              valueColor: AlwaysStoppedAnimation(context.sw.win),
-            ),
-          ),
+    eyebrowIcon: Icons.bolt_rounded,
+    eyebrow: '${(progress * 100).round()}% done',
+    headline: 'Finish your profile',
+    body: 'Add $missing - complete profiles get far more matches.',
+    middle: ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: progress),
+        duration: const Duration(milliseconds: 900),
+        curve: Curves.easeOutCubic,
+        builder: (context, v, _) => LinearProgressIndicator(
+          value: v,
+          minHeight: 10,
+          backgroundColor: Colors.white.withValues(alpha: 0.15),
+          valueColor: AlwaysStoppedAnimation(context.sw.win),
         ),
-        cta: 'Continue',
-        onCta: () => _push(const ProfileSetupPage()),
-      );
+      ),
+    ),
+    cta: 'Continue',
+    onCta: () => _push(const ProfileSetupPage()),
+  );
 
   Widget _discoverHero() => _heroShell(
-        eyebrowIcon: Icons.explore_rounded,
-        eyebrow: 'Your next swap',
-        headline: 'Find someone to learn from this week',
-        body: 'People whose skills fit yours are ranked first.',
-        cta: 'Discover people',
-        onCta: () => widget.onNavigateToTab?.call(1),
-      );
+    eyebrowIcon: Icons.explore_rounded,
+    eyebrow: 'Your next swap',
+    headline: 'Find someone to learn from this week',
+    body: 'People whose skills fit yours are ranked first.',
+    cta: 'Discover people',
+    onCta: () => widget.onNavigateToTab?.call(1),
+  );
 
   // ---------------------------------------------------------------- tiles
 
@@ -599,8 +746,12 @@ class _HomeDashboardState extends State<HomeDashboard> {
         children: [
           Expanded(
             child: _tile(
-              countValue: completion == null ? null : (completion.$1 * 100).round(),
-              value: completion == null ? '-' : '${(completion.$1 * 100).round()}%',
+              countValue: completion == null
+                  ? null
+                  : (completion.$1 * 100).round(),
+              value: completion == null
+                  ? '-'
+                  : '${(completion.$1 * 100).round()}%',
               label: 'profile strength',
               color: c.get,
               onTap: () => _push(const ProfileSetupPage()),
@@ -625,16 +776,20 @@ class _HomeDashboardState extends State<HomeDashboard> {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Builder(builder: (context) {
-              final n = _unreadRooms(_chatRoomsSnapshot?.docs ?? const []).length;
-              return _tile(
-                countValue: n,
-                value: '$n',
-                label: n == 1 ? 'unread chat' : 'unread chats',
-                color: c.text,
-                onTap: () => widget.onNavigateToTab?.call(2),
-              );
-            }),
+            child: Builder(
+              builder: (context) {
+                final n = _unreadRooms(
+                  _chatRoomsSnapshot?.docs ?? const [],
+                ).length;
+                return _tile(
+                  countValue: n,
+                  value: '$n',
+                  label: n == 1 ? 'unread chat' : 'unread chats',
+                  color: c.text,
+                  onTap: () => widget.onNavigateToTab?.call(2),
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -653,7 +808,10 @@ class _HomeDashboardState extends State<HomeDashboard> {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(20)),
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(20),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -661,12 +819,22 @@ class _HomeDashboardState extends State<HomeDashboard> {
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
               child: countValue == null
-                  ? Text(value,
-                      style: AppTheme.display(fontSize: 30, color: color, height: 1.1))
+                  ? Text(
+                      value,
+                      style: AppTheme.display(
+                        fontSize: 30,
+                        color: color,
+                        height: 1.1,
+                      ),
+                    )
                   : CountUpText(
                       value: countValue,
                       suffix: value.endsWith('%') ? '%' : '',
-                      style: AppTheme.display(fontSize: 30, color: color, height: 1.1),
+                      style: AppTheme.display(
+                        fontSize: 30,
+                        color: color,
+                        height: 1.1,
+                      ),
                     ),
             ),
             const SizedBox(height: 4),
@@ -674,7 +842,11 @@ class _HomeDashboardState extends State<HomeDashboard> {
               label,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.manrope(fontSize: 11.5, color: c.textMuted, height: 1.3),
+              style: GoogleFonts.manrope(
+                fontSize: 11.5,
+                color: c.textMuted,
+                height: 1.3,
+              ),
             ),
           ],
         ),
@@ -698,7 +870,10 @@ class _HomeDashboardState extends State<HomeDashboard> {
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(18)),
+          decoration: BoxDecoration(
+            color: c.surface,
+            borderRadius: BorderRadius.circular(18),
+          ),
           child: Row(
             children: [
               Container(
@@ -715,15 +890,27 @@ class _HomeDashboardState extends State<HomeDashboard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        style: GoogleFonts.manrope(
-                            fontSize: 13.5, fontWeight: FontWeight.w800, color: c.text)),
+                    Text(
+                      title,
+                      style: GoogleFonts.manrope(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        color: c.text,
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    Text(subtitle, style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted)),
+                    Text(
+                      subtitle,
+                      style: GoogleFonts.manrope(
+                        fontSize: 12,
+                        color: c.textMuted,
+                      ),
+                    ),
                   ],
                 ),
               ),
-              if (onTap != null) Icon(Icons.chevron_right_rounded, color: c.textMuted),
+              if (onTap != null)
+                Icon(Icons.chevron_right_rounded, color: c.textMuted),
             ],
           ),
         ),
@@ -737,7 +924,8 @@ class _HomeDashboardState extends State<HomeDashboard> {
     return FutureBuilder<QuerySnapshot>(
       future: _profileViewsFuture,
       builder: (context, snapshot) {
-        if (snapshot.hasError || !snapshot.hasData) return const SizedBox.shrink();
+        if (snapshot.hasError || !snapshot.hasData)
+          return const SizedBox.shrink();
         final viewers = snapshot.data!.docs
             .map((d) => (d.data() as Map<String, dynamic>)['viewerId'])
             .toSet()
@@ -746,7 +934,8 @@ class _HomeDashboardState extends State<HomeDashboard> {
         return _slimRow(
           icon: Icons.visibility_rounded,
           color: context.sw.get,
-          title: '$viewers ${viewers == 1 ? 'person' : 'people'} viewed your profile',
+          title:
+              '$viewers ${viewers == 1 ? 'person' : 'people'} viewed your profile',
           subtitle: 'In the last 7 days',
         );
       },
@@ -762,8 +951,9 @@ class _HomeDashboardState extends State<HomeDashboard> {
     for (final doc in completed.take(20)) {
       final data = doc.data() as Map<String, dynamic>;
       final names = Map<String, dynamic>.from(data['participantNames'] ?? {});
-      final otherId = List<String>.from(data['participants'] ?? [])
-          .firstWhere((p) => p != _uid, orElse: () => '');
+      final otherId = List<String>.from(
+        data['participants'] ?? [],
+      ).firstWhere((p) => p != _uid, orElse: () => '');
       if (otherId.isEmpty) continue;
       // What the partner learned from you in that swap.
       final theirWant = swapSidesFor(data, _uid).myGive.toLowerCase();
@@ -773,7 +963,8 @@ class _HomeDashboardState extends State<HomeDashboard> {
         icon: Icons.volunteer_activism_rounded,
         color: context.sw.give,
         title: 'Swap again with ${otherName.split(' ').first}',
-        subtitle: 'They learned $theirWant from you - there may be more to trade.',
+        subtitle:
+            'They learned $theirWant from you - there may be more to trade.',
         onTap: () => widget.onNavigateToTab?.call(2),
       );
     }
@@ -785,7 +976,8 @@ class _HomeDashboardState extends State<HomeDashboard> {
     return FutureBuilder<DocumentSnapshot>(
       future: _communityFuture,
       builder: (context, snapshot) {
-        if (snapshot.hasError || !snapshot.hasData) return const SizedBox.shrink();
+        if (snapshot.hasError || !snapshot.hasData)
+          return const SizedBox.shrink();
         final data = snapshot.data!.data() as Map<String, dynamic>?;
         final total = (data?['completedSwaps'] as num?)?.toInt() ?? 0;
         if (total == 0) return const SizedBox.shrink();

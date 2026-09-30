@@ -45,7 +45,9 @@ class _ComplaintPageState extends State<ComplaintPage> {
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Complaint submitted - our team will follow up by email.'),
+          content: Text(
+            'Complaint submitted - our team will follow up by email.',
+          ),
         ),
       );
     } else {
@@ -91,7 +93,8 @@ class _ComplaintPageState extends State<ComplaintPage> {
               maxLines: 6,
               decoration: const InputDecoration(
                 labelText: 'Description',
-                hintText: 'What happened? Include any details that help us investigate.',
+                hintText:
+                    'What happened? Include any details that help us investigate.',
                 alignLabelWithHint: true,
               ),
             ),

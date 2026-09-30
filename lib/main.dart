@@ -28,7 +28,6 @@ import 'Screen/Auth/Startpage.dart';
 import 'Screen/Auth/legal_consent_page.dart';
 import 'Screen/splash_screen.dart';
 import 'Screen/User/Bottomnav.dart';
-import 'Screen/User/chat_page.dart';
 import 'Screen/User/setup.dart';
 import 'providers/app_state.dart';
 import 'providers/user_data_provider.dart';
@@ -98,6 +97,13 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   bool _splashDone = false;
 
+  /// Created once. Building a new authStateChanges() stream on every rebuild
+  /// (and the whole app rebuilds whenever AppState changes - e.g. the unread
+  /// count when a request or message arrives) made the StreamBuilder drop
+  /// back to "waiting", swap the app for a spinner and rebuild the bottom
+  /// nav from scratch - throwing people back to the Home tab.
+  final Stream<User?> _authChanges = FirebaseAuth.instance.authStateChanges();
+
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
@@ -134,10 +140,11 @@ class _MyAppState extends State<MyApp> {
 
   Widget _buildMainContent(AppState appState) {
     return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
+      stream: _authChanges,
       initialData: FirebaseAuth.instance.currentUser,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
@@ -149,7 +156,10 @@ class _MyAppState extends State<MyApp> {
           return const StarterPage();
         }
 
-        if (appState.loading || appState.currentUser == null) {
+        // Only the very first load shows a spinner. Later reloads (a
+        // profile save sets `loading`) must not replace the app, or the
+        // current tab and screen are lost.
+        if (appState.currentUser == null) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );

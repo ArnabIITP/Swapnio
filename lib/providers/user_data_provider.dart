@@ -7,21 +7,22 @@ import '../models/user_model.dart';
 class UserDataProvider extends ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  
+
   Map<String, dynamic>? _userData;
   UserModel? _userModel;
   bool _isLoading = true;
   StreamSubscription<DocumentSnapshot>? _userSubscription;
-  
+  bool _markedActive = false;
+
   UserDataProvider() {
     _initUserListener();
   }
-  
+
   // Getters
   Map<String, dynamic>? get userData => _userData;
   UserModel? get userModel => _userModel;
   bool get isLoading => _isLoading;
-  
+
   // Initialize real-time user data listener
   void _initUserListener() {
     final user = _auth.currentUser;
@@ -30,108 +31,129 @@ class UserDataProvider extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    
+
     _userSubscription?.cancel();
     _isLoading = true;
     notifyListeners();
-    
+
     // Listen to real-time user data updates
     _userSubscription = _firestore
         .collection('users')
         .doc(user.uid)
         .snapshots()
-        .listen((docSnapshot) async {
-          if (docSnapshot.exists) {
-            _userData = docSnapshot.data();
-            _userData!['id'] = user.uid;
-            
-            // Make sure memberSince is always a timestamp
-            if (_userData!['memberSince'] == null) {
-              // If memberSince is missing, set it to now
-              final timestamp = Timestamp.now();
-              await _firestore
-                .collection('users')
-                .doc(user.uid)
-                .update({'memberSince': timestamp});
-              _userData!['memberSince'] = timestamp;
-            }
-            
-            // Fetch real-time ratings
-            try {
-              // Get the average rating from ratings collection
-              final ratingsSnapshot = await _firestore
-                .collection('ratings')
-                // Ratings store the recipient on `toUserId` (see AppState.rateUser
-                // and chat_page rating submit). Querying `userId` never matches.
-                .where('toUserId', isEqualTo: user.uid)
-                .get();
-              
-              if (ratingsSnapshot.docs.isNotEmpty) {
-                double totalRating = 0;
-                for (var doc in ratingsSnapshot.docs) {
-                  totalRating += (doc.data()['rating'] ?? 0).toDouble();
-                }
-                double averageRating = totalRating / ratingsSnapshot.docs.length;
-                // Display-only recompute from the `ratings` collection (the
-                // source of truth): `rating` is a trust/reputation field, so
-                // security rules now block a user writing it on their own
-                // document - only the "other user submits a rating" flow
-                // (app_state.rateUser / chat_page._submitRating) may update
-                // it, which is exactly what keeps it from being self-forged.
-                _userData!['rating'] = averageRating;
+        .listen(
+          (docSnapshot) async {
+            if (docSnapshot.exists) {
+              _userData = docSnapshot.data();
+              _userData!['id'] = user.uid;
+
+              // Discover hides people who haven't opened the app in 30 days,
+              // so record activity - at most every 12 hours, not per snapshot.
+              final lastActive = (_userData!['lastActiveAt'] as Timestamp?)
+                  ?.toDate();
+              if (!_markedActive &&
+                  (lastActive == null ||
+                      DateTime.now().difference(lastActive) >
+                          const Duration(hours: 12))) {
+                _markedActive = true;
+                _firestore
+                    .collection('users')
+                    .doc(user.uid)
+                    .update({'lastActiveAt': FieldValue.serverTimestamp()})
+                    .catchError((_) {});
               }
 
-              // Fetch completed swaps count
-              final swapsSnapshot = await _firestore
-                .collection('swaps')
-                .where('participants', arrayContains: user.uid)
-                .where('status', isEqualTo: 'completed')
-                .get();
+              // Make sure memberSince is always a timestamp
+              if (_userData!['memberSince'] == null) {
+                // If memberSince is missing, set it to now
+                final timestamp = Timestamp.now();
+                await _firestore.collection('users').doc(user.uid).update({
+                  'memberSince': timestamp,
+                });
+                _userData!['memberSince'] = timestamp;
+              }
 
-              // Display-only, same reasoning as `rating` above - not
-              // persisted back since `completedSwaps` is self-write-protected.
-              int completedSwapsCount = swapsSnapshot.docs.length;
-              _userData!['completedSwaps'] = completedSwapsCount;
+              // Fetch real-time ratings
+              try {
+                // Get the average rating from ratings collection
+                final ratingsSnapshot = await _firestore
+                    .collection('ratings')
+                    // Ratings store the recipient on `toUserId` (see chat_page's
+                    // rating submit). Querying `userId` never matches.
+                    .where('toUserId', isEqualTo: user.uid)
+                    .get();
 
-            } catch (e) {
-              print('Error fetching real-time metrics: $e');
-              // Continue with existing data even if metrics update fails
+                if (ratingsSnapshot.docs.isNotEmpty) {
+                  double totalRating = 0;
+                  for (var doc in ratingsSnapshot.docs) {
+                    totalRating += (doc.data()['rating'] ?? 0).toDouble();
+                  }
+                  double averageRating =
+                      totalRating / ratingsSnapshot.docs.length;
+                  // Display-only recompute from the `ratings` collection (the
+                  // source of truth): `rating` is a trust/reputation field, so
+                  // security rules now block a user writing it on their own
+                  // document - only the "other user submits a rating" flow
+                  // (chat_page._submitRating) may update
+                  // it, which is exactly what keeps it from being self-forged.
+                  _userData!['rating'] = averageRating;
+                }
+
+                // Fetch completed swaps count
+                final swapsSnapshot = await _firestore
+                    .collection('swaps')
+                    .where('participants', arrayContains: user.uid)
+                    .where('status', isEqualTo: 'completed')
+                    .get();
+
+                // Display-only, same reasoning as `rating` above - not
+                // persisted back since `completedSwaps` is self-write-protected.
+                int completedSwapsCount = swapsSnapshot.docs.length;
+                _userData!['completedSwaps'] = completedSwapsCount;
+              } catch (e) {
+                print('Error fetching real-time metrics: $e');
+                // Continue with existing data even if metrics update fails
+              }
+
+              // Create UserModel with updated data
+              _userModel = UserModel.fromMap(_userData!, user.uid);
+            } else {
+              // Create new user document with current timestamp
+              final timestamp = Timestamp.now();
+              _userData = {
+                'name': user.displayName ?? 'Anonymous User',
+                'bio': 'No bio available',
+                'skillsOffered': [],
+                'skillsWanted': [],
+                'availability': [],
+                'rating': 0.0,
+                'completedSwaps': 0,
+                'memberSince': timestamp,
+                'id': user.uid,
+              };
+              _userModel = UserModel.fromMap(_userData!, user.uid);
+
+              // Create the user document in Firestore
+              await _firestore
+                  .collection('users')
+                  .doc(user.uid)
+                  .set(_userData!);
             }
-            
-            // Create UserModel with updated data
-            _userModel = UserModel.fromMap(_userData!, user.uid);
-          } else {
-            // Create new user document with current timestamp
-            final timestamp = Timestamp.now();
-            _userData = {
-              'name': user.displayName ?? 'Anonymous User',
-              'bio': 'No bio available',
-              'skillsOffered': [],
-              'skillsWanted': [],
-              'availability': [],
-              'rating': 0.0,
-              'completedSwaps': 0,
-              'memberSince': timestamp,
-              'id': user.uid
-            };
-            _userModel = UserModel.fromMap(_userData!, user.uid);
-            
-            // Create the user document in Firestore
-            await _firestore.collection('users').doc(user.uid).set(_userData!);
-          }
-          _isLoading = false;
-          notifyListeners();
-        }, onError: (e) {
-          print('Error getting user data: $e');
-          _isLoading = false;
-          notifyListeners();
-        });
+            _isLoading = false;
+            notifyListeners();
+          },
+          onError: (e) {
+            print('Error getting user data: $e');
+            _isLoading = false;
+            notifyListeners();
+          },
+        );
   }
-  
+
   // Helper method to safely convert any data to List<String>
   List<String> convertToStringList(dynamic data) {
     if (data == null) return [];
-    
+
     if (data is String) {
       // If it's a single string, wrap it in a list
       return [data];
@@ -143,12 +165,12 @@ class UserDataProvider extends ChangeNotifier {
       return [];
     }
   }
-  
+
   // Refresh user data (manually trigger)
   void refreshUserData() {
     _initUserListener();
   }
-  
+
   // Update user profile data in real-time
   Future<void> updateUserProfile({
     String? name,
@@ -159,23 +181,23 @@ class UserDataProvider extends ChangeNotifier {
     String? photoUrl,
   }) async {
     if (_auth.currentUser == null || _userData == null) return;
-    
+
     final Map<String, dynamic> updates = {};
-    
+
     if (name != null) updates['name'] = name;
     if (bio != null) updates['bio'] = bio;
     if (skillsOffered != null) updates['skillsOffered'] = skillsOffered;
     if (skillsWanted != null) updates['skillsWanted'] = skillsWanted;
     if (availability != null) updates['availability'] = availability;
     if (photoUrl != null) updates['photoUrl'] = photoUrl;
-    
+
     if (updates.isNotEmpty) {
       try {
         await _firestore
-          .collection('users')
-          .doc(_auth.currentUser!.uid)
-          .update(updates);
-        
+            .collection('users')
+            .doc(_auth.currentUser!.uid)
+            .update(updates);
+
         // Data will be automatically updated via the listener
       } catch (e) {
         print('Error updating user data: $e');
@@ -183,24 +205,22 @@ class UserDataProvider extends ChangeNotifier {
       }
     }
   }
-  
+
   // Update a single field in real-time
   Future<void> updateField(String field, dynamic value) async {
     if (_auth.currentUser == null) return;
-    
+
     try {
       // Update the field in Firestore
-      await _firestore
-        .collection('users')
-        .doc(_auth.currentUser!.uid)
-        .update({field: value});
-      
+      await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
+        field: value,
+      });
+
       // Add a timestamp for the last update
-      await _firestore
-        .collection('users')
-        .doc(_auth.currentUser!.uid)
-        .update({'lastUpdated': FieldValue.serverTimestamp()});
-      
+      await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+
       // Track the change in activity log for analytics
       try {
         await _firestore.collection('activityLogs').add({
@@ -213,13 +233,12 @@ class UserDataProvider extends ChangeNotifier {
         // Non-critical error - don't stop execution if logging fails
         print('Error logging activity: $logError');
       }
-      
     } catch (e) {
       print('Error updating field $field: $e');
       throw e; // Re-throw to allow UI to handle the error
     }
   }
-  
+
   @override
   void dispose() {
     _userSubscription?.cancel();

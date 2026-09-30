@@ -11,9 +11,9 @@ import '../../theme.dart';
 import '../../ui/swapnio_badges.dart';
 import '../../ui/swapnio_kit.dart';
 import '../../ui/swapnio_widgets.dart';
+import '../../ui/verified_badge.dart';
 import '../../ui/celebration.dart';
 import 'setup.dart';
-import 'user_detail.dart';
 import 'dart:math' show pi;
 
 class Swap extends StatefulWidget {
@@ -42,11 +42,11 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
   double _dragX = 0;
   double _dragY = 0;
   double _dragRotation = 0.0;
-  // Browsing used to live in a separate Home tab doing the same job; it's now
-  // a mode of Discover for people who'd rather scan a list than swipe.
-  bool _listMode = false;
-  String _searchQuery = '';
-  final TextEditingController _searchController = TextEditingController();
+  // After the skill matches run out, the deck can widen to everyone active.
+  bool _exploreMode = false;
+
+  /// Show only members with both email and phone verified.
+  bool _verifiedOnly = false;
   // Swipe-up-to-favourite is invisible unless we teach it once.
   bool _showCoachmarks = false;
   // Built once, not in build(): a stream created during build is a new object
@@ -75,8 +75,10 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      final doc =
-          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
       if (doc.data()?['hasSeenSwipeCoachmarks'] == true) return;
       if (mounted) setState(() => _showCoachmarks = true);
     } catch (_) {
@@ -89,92 +91,138 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .set({'hasSeenSwipeCoachmarks': true}, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'hasSeenSwipeCoachmarks': true,
+      }, SetOptions(merge: true));
     } catch (_) {
       // Worst case they see the hint again next launch.
     }
   }
 
-  List<Map<String, dynamic>> get _searchResults {
-    if (_searchQuery.trim().isEmpty) return _users;
-    final query = _searchQuery.toLowerCase();
-    return _users.where((user) {
-      final name = (user['name'] ?? '').toString().toLowerCase();
-      final bio = (user['bio'] ?? '').toString().toLowerCase();
-      final offered = List<String>.from(user['skillsOffered'] ?? [])
-          .join(' ')
-          .toLowerCase();
-      final wanted =
-          List<String>.from(user['skillsWanted'] ?? []).join(' ').toLowerCase();
-      return name.contains(query) ||
-          bio.contains(query) ||
-          offered.contains(query) ||
-          wanted.contains(query);
-    }).toList();
-  }
-
   @override
   void dispose() {
     _animationController.dispose();
-    _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadUsers() async {
-    setState(() => _isLoading = true);
+  /// Builds the deck. By default it only fetches people who teach something
+  /// I want to learn or want something I teach (two array-contains-any
+  /// queries on the catalog skill names), instead of downloading every user.
+  /// [explore] widens it to everyone active once the matches run out.
+  ///
+  /// Hidden from the deck: me, people I've already requested or matched
+  /// with, blocked/banned and private profiles, profiles with nothing to
+  /// teach, and anyone who hasn't opened the app in 30 days.
+  Future<void> _loadUsers({bool explore = false}) async {
+    setState(() {
+      _isLoading = true;
+      _exploreMode = explore;
+    });
     try {
       final currentUserId = FirebaseAuth.instance.currentUser?.uid;
       if (currentUserId == null) {
         if (mounted) setState(() => _isLoading = false);
         return;
       }
+      final firestore = FirebaseFirestore.instance;
 
-      // Fire all independent Firestore queries in parallel instead of
-      // sequentially — cuts load time from ~4 round-trips to ~1.
       final results = await Future.wait([
-        FirebaseFirestore.instance.collection('users').doc(currentUserId).get(),                 // 0: my profile
-        FirebaseFirestore.instance.collection('users').get(),                                     // 1: all users
-        FirebaseFirestore.instance.collection('swipeRequests')
-            .where('fromUserId', isEqualTo: currentUserId).get(),                                // 2: my sent requests
-        FirebaseFirestore.instance.collection('chatRooms')
-            .where('users', arrayContains: currentUserId).get(),                                 // 3: my chat rooms
-        SafetyService.instance.hiddenUserIds(),                                                  // 4: blocked users
+        firestore.collection('users').doc(currentUserId).get(), // 0: my profile
+        firestore
+            .collection('swipeRequests')
+            .where('fromUserId', isEqualTo: currentUserId)
+            .get(), // 1
+        firestore
+            .collection('chatRooms')
+            .where('users', arrayContains: currentUserId)
+            .get(), // 2
+        SafetyService.instance.hiddenUserIds(), // 3: blocked users
       ]);
 
       final currentUserDoc = results[0] as DocumentSnapshot;
-      final snapshot = results[1] as QuerySnapshot;
-      final requestedSnapshot = results[2] as QuerySnapshot;
-      final chatRoomsSnapshot = results[3] as QuerySnapshot;
-      final hiddenIds = results[4] as Set<String>;
+      final requestedSnapshot = results[1] as QuerySnapshot;
+      final chatRoomsSnapshot = results[2] as QuerySnapshot;
+      final hiddenIds = results[3] as Set<String>;
 
-      List<String> mySkillsWanted = [];
-      List<String> mySkillsOffered = [];
-      List<String> myAvailability = [];
-      if (currentUserDoc.exists) {
-        final currentUserData = currentUserDoc.data() as Map<String, dynamic>;
-        mySkillsWanted = List<String>.from(currentUserData['skillsWanted'] ?? []);
-        mySkillsOffered = List<String>.from(currentUserData['skillsOffered'] ?? []);
-        myAvailability = List<String>.from(currentUserData['availability'] ?? []);
+      final me = (currentUserDoc.data() as Map<String, dynamic>?) ?? const {};
+      final mySkillsWanted = List<String>.from(me['skillsWanted'] ?? []);
+      final mySkillsOffered = List<String>.from(me['skillsOffered'] ?? []);
+      final myAvailability = List<String>.from(me['availability'] ?? []);
+
+      // array-contains-any takes at most 30 values.
+      final users = firestore.collection('users');
+      final queries = <Future<QuerySnapshot>>[
+        if (explore) users.limit(120).get(),
+        if (!explore && mySkillsWanted.isNotEmpty)
+          users
+              .where(
+                'skillsOffered',
+                arrayContainsAny: mySkillsWanted.take(30).toList(),
+              )
+              .limit(150)
+              .get(),
+        if (!explore && mySkillsOffered.isNotEmpty)
+          users
+              .where(
+                'skillsWanted',
+                arrayContainsAny: mySkillsOffered.take(30).toList(),
+              )
+              .limit(150)
+              .get(),
+      ];
+      final candidates = <String, Map<String, dynamic>>{};
+      for (final snap in await Future.wait(queries)) {
+        for (final doc in snap.docs) {
+          candidates[doc.id] = doc.data() as Map<String, dynamic>;
+        }
       }
 
       final requestedUserIds = requestedSnapshot.docs
-          .map((doc) => (doc.data() as Map<String, dynamic>)['toUserId'] as String? ?? '')
+          .map(
+            (doc) =>
+                (doc.data() as Map<String, dynamic>)['toUserId'] as String? ??
+                '',
+          )
           .where((id) => id.isNotEmpty)
           .toSet();
       final matchedUserIds = chatRoomsSnapshot.docs
-          .expand((doc) => List<String>.from((doc.data() as Map<String, dynamic>)['users'] ?? []))
+          .expand(
+            (doc) => List<String>.from(
+              (doc.data() as Map<String, dynamic>)['users'] ?? [],
+            ),
+          )
           .where((id) => id != currentUserId)
           .toSet();
-      final allUsers = snapshot.docs
-          .where((doc) => doc.id != currentUserId)
-          .map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        final userId = doc.id;
+
+      final now = DateTime.now();
+      final deck = <Map<String, dynamic>>[];
+      for (final entry in candidates.entries) {
+        final userId = entry.key;
+        final data = entry.value;
+        if (userId == currentUserId ||
+            requestedUserIds.contains(userId) ||
+            matchedUserIds.contains(userId) ||
+            hiddenIds.contains(userId) ||
+            data['isBanned'] == true) {
+          continue;
+        }
+        final privacy = data['privacy'];
+        if (privacy is Map && privacy['profileVisibility'] == 'private') {
+          continue;
+        }
+        final verified = data['verified'] == true;
+        if (_verifiedOnly && !verified) continue;
+        final name = (data['name'] as String?)?.trim() ?? '';
         final skillsOffered = List<String>.from(data['skillsOffered'] ?? []);
         final skillsWanted = List<String>.from(data['skillsWanted'] ?? []);
+        // Incomplete profile.
+        if (name.isEmpty || skillsOffered.isEmpty) continue;
+        final lastActive = (data['lastActiveAt'] as Timestamp?)?.toDate();
+        final idleDays = lastActive == null
+            ? null
+            : now.difference(lastActive).inDays;
+        if (idleDays != null && idleDays > 30) continue;
+
         final availability = List<String>.from(data['availability'] ?? []);
         final match = MatchService.compute(
           mySkillsOffered: mySkillsOffered,
@@ -185,9 +233,27 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           candidateAvailability: availability,
           candidateRating: (data['rating'] as num?)?.toDouble() ?? 0.0,
         );
-        return {
+        final mutual =
+            match.theyTeachIWant.isNotEmpty && match.iTeachTheyWant.isNotEmpty;
+
+        // Ranking: a two-way swap first, then match strength (which already
+        // includes shared availability), then reliability and recency.
+        final attended = (data['sessionsAttended'] as num?)?.toInt() ?? 0;
+        final noShows = (data['noShowCount'] as num?)?.toInt() ?? 0;
+        var score = match.percent + (mutual ? 100 : 0);
+        score += (attended + noShows >= 3 && attended * 2 < attended + noShows)
+            ? -40
+            : attended.clamp(0, 10).toDouble();
+        if (idleDays != null) score += idleDays <= 7 ? 15 : 5;
+        // Welcome boost for people who joined through a friend's QR.
+        final boostUntil = (data['boostUntil'] as Timestamp?)?.toDate();
+        if (boostUntil != null && boostUntil.isAfter(now)) score += 25;
+        // Verified members (email + phone) rank a little higher.
+        if (verified) score += 20;
+
+        deck.add({
           'id': userId,
-          'name': data['name'] ?? 'Anonymous',
+          'name': name,
           'skillsOffered': skillsOffered,
           'skillsWanted': skillsWanted,
           'availability': availability,
@@ -199,19 +265,19 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           'theyTeachIWant': match.theyTeachIWant,
           'iTeachTheyWant': match.iTeachTheyWant,
           'sharedAvailability': match.sharedAvailability,
-          'isBanned': data['isBanned'] ?? false,
-        };
-      }).where((user) =>
-          !requestedUserIds.contains(user['id']) &&
-          !matchedUserIds.contains(user['id']) &&
-          !hiddenIds.contains(user['id']) &&
-          user['isBanned'] != true).toList();
-      allUsers.sort((a, b) =>
-          (b['matchPercent'] as double).compareTo(a['matchPercent'] as double));
+          'mutualMatch': mutual,
+          'verified': verified,
+          'score': score,
+          'isBanned': false,
+        });
+      }
+      deck.sort(
+        (a, b) => (b['score'] as double).compareTo(a['score'] as double),
+      );
 
       if (mounted) {
         setState(() {
-          _users = allUsers;
+          _users = deck;
           _swipedUsers = [];
           _currentIndex = 0;
           _isLoading = false;
@@ -221,7 +287,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
         });
       }
     } catch (e) {
-      print('Error loading users: $e');
+      debugPrint('Error loading users: $e');
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -256,7 +322,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
         'userId': toUser["id"],
         'type': 'swap_request',
         'message':
-        '${currentUserData['name'] ?? "Someone"} wants to swap skills with you',
+            '${currentUserData['name'] ?? "Someone"} wants to swap skills with you',
         'timestamp': FieldValue.serverTimestamp(),
         'read': false,
         'senderId': currentUser.uid,
@@ -333,7 +399,8 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
       context,
       icon: Icons.favorite,
       headline: "It's a Match!",
-      message: 'You and $name liked each other. '
+      message:
+          'You and $name liked each other. '
           'Say hi before the moment passes.',
       primaryLabel: 'Say hi →',
       onPrimary: () => widget.onNavigateToTab?.call(2),
@@ -351,8 +418,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
     setState(() {
       _dragX = details.globalPosition.dx - _dragStart.dx;
       _dragY = details.globalPosition.dy - _dragStart.dy;
-      _dragRotation =
-          _dragX / (MediaQuery.of(context).size.width * 0.8) * 0.2;
+      _dragRotation = _dragX / (MediaQuery.of(context).size.width * 0.8) * 0.2;
 
       // Determine if the drag is predominantly vertical
       final isVerticalDrag = _dragY.abs() > _dragX.abs() * 1.5;
@@ -362,11 +428,20 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
       final dragPercentageY = _dragY / MediaQuery.of(context).size.height;
       final baseColor = Theme.of(context).scaffoldBackgroundColor;
       final redColor = Color.lerp(
-          baseColor, context.sw.get.withValues(alpha: 0.2), -dragPercentageX.clamp(-1.0, 0.0))!;
+        baseColor,
+        context.sw.get.withValues(alpha: 0.2),
+        -dragPercentageX.clamp(-1.0, 0.0),
+      )!;
       final greenColor = Color.lerp(
-          baseColor, context.sw.give.withValues(alpha: 0.2), dragPercentageX.clamp(0.0, 1.0))!;
+        baseColor,
+        context.sw.give.withValues(alpha: 0.2),
+        dragPercentageX.clamp(0.0, 1.0),
+      )!;
       final blueColor = Color.lerp(
-          baseColor, Colors.blue.withValues(alpha: 0.1), -dragPercentageY.clamp(-1.0, 0.0))!;
+        baseColor,
+        Colors.blue.withValues(alpha: 0.1),
+        -dragPercentageY.clamp(-1.0, 0.0),
+      )!;
 
       if (isVerticalDrag && _dragY < 0) {
         _dragTintColor = blueColor;
@@ -395,7 +470,8 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
       _animateCardUp();
     }
     // Then check for horizontal swipes
-    else if (!isVerticalDrag && (_dragX.abs() > cardWidth * 0.4 || velocity.dx.abs() > 800)) {
+    else if (!isVerticalDrag &&
+        (_dragX.abs() > cardWidth * 0.4 || velocity.dx.abs() > 800)) {
       HapticFeedback.mediumImpact();
       _animateCardOut(_dragX > 0);
     }
@@ -522,26 +598,29 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
         const SnackBar(content: Text("Rewinded to the previous card")),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("No more cards to rewind")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("No more cards to rewind")));
     }
   }
 
   void _onDislike() {
-    if (_isLoading || _isProcessingAction || _currentIndex >= _users.length) return;
+    if (_isLoading || _isProcessingAction || _currentIndex >= _users.length)
+      return;
     HapticFeedback.mediumImpact();
     _animateCardOut(false);
   }
 
   void _onFavorite() {
-    if (_isLoading || _isProcessingAction || _currentIndex >= _users.length) return;
+    if (_isLoading || _isProcessingAction || _currentIndex >= _users.length)
+      return;
     HapticFeedback.mediumImpact();
     _animateCardUp();
   }
 
   void _onLike() {
-    if (_isLoading || _isProcessingAction || _currentIndex >= _users.length) return;
+    if (_isLoading || _isProcessingAction || _currentIndex >= _users.length)
+      return;
     HapticFeedback.mediumImpact();
     _animateCardOut(true);
   }
@@ -569,7 +648,10 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
                 ),
               ),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: context.sw.give,
                   borderRadius: BorderRadius.circular(16),
@@ -611,16 +693,14 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text('Discover',
-                        style: AppTheme.display(fontSize: 34, color: c.text)),
+                    child: Text(
+                      'Discover',
+                      style: AppTheme.display(fontSize: 34, color: c.text),
+                    ),
                   ),
                   _buildLikesYouBadge(),
                   const SizedBox(width: 8),
-                  _headerButton(
-                    icon: _listMode ? Icons.style_rounded : Icons.view_list_rounded,
-                    tooltip: _listMode ? 'Swipe view' : 'List view',
-                    onTap: () => setState(() => _listMode = !_listMode),
-                  ),
+                  _verifiedFilterButton(),
                   const SizedBox(width: 8),
                   _headerButton(
                     icon: Icons.refresh_rounded,
@@ -633,12 +713,48 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
             Expanded(
               child: Stack(
                 children: [
-                  _listMode ? _buildListMode() : _buildDeckMode(),
-                  if (_showCoachmarks && !_listMode) _buildCoachmarks(),
+                  _buildDeckMode(),
+                  if (_showCoachmarks) _buildCoachmarks(),
                 ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _verifiedFilterButton() {
+    final c = context.sw;
+    final on = _verifiedOnly;
+    return Tooltip(
+      message: on ? 'Showing verified members only' : 'Show verified only',
+      child: Semantics(
+        button: true,
+        toggled: on,
+        label: 'Verified only',
+        child: Pressable(
+          onTap: _isLoading
+              ? null
+              : () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _verifiedOnly = !on);
+                  _loadUsers(explore: _exploreMode);
+                },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: on ? c.cta : c.surface,
+              shape: BoxShape.circle,
+            ),
+            child: Opacity(
+              opacity: on ? 1 : 0.55,
+              child: const VerifiedSeal(size: 22),
+            ),
+          ),
         ),
       ),
     );
@@ -658,8 +774,12 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           width: 44,
           height: 44,
           decoration: BoxDecoration(color: c.surface, shape: BoxShape.circle),
-          child: Icon(icon,
-              size: 20, color: onTap == null ? c.textMuted : c.text, semanticLabel: tooltip),
+          child: Icon(
+            icon,
+            size: 20,
+            color: onTap == null ? c.textMuted : c.text,
+            semanticLabel: tooltip,
+          ),
         ),
       ),
     );
@@ -673,157 +793,43 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
         final isVerticalDrag = _dragY.abs() > _dragX.abs() * 1.5;
 
         // Calculate progress from 0.0 to 1.0 based on how far the card is dragged
-        final likeProgress = !isVerticalDrag ? (_dragX / (screenWidth * 0.5)).clamp(0.0, 1.0) : 0.0;
-        final dislikeProgress = !isVerticalDrag ? (-_dragX / (screenWidth * 0.5)).clamp(0.0, 1.0) : 0.0;
-        final favoriteProgress = isVerticalDrag ? (-_dragY / (screenHeight * 0.4)).clamp(0.0, 1.0) : 0.0;
+        final likeProgress = !isVerticalDrag
+            ? (_dragX / (screenWidth * 0.5)).clamp(0.0, 1.0)
+            : 0.0;
+        final dislikeProgress = !isVerticalDrag
+            ? (-_dragX / (screenWidth * 0.5)).clamp(0.0, 1.0)
+            : 0.0;
+        final favoriteProgress = isVerticalDrag
+            ? (-_dragY / (screenHeight * 0.4)).clamp(0.0, 1.0)
+            : 0.0;
 
         return _isLoading
             ? _buildLoadingState()
             : _users.isEmpty || _currentIndex >= _users.length
             ? _buildEmptyState()
             : Column(
-          children: [
-            Expanded(
-              child: Stack(
-                alignment: Alignment.center,
                 children: [
-                  if (_currentIndex + 1 < _users.length)
-                    _buildSwipeCard(
-                      _users[_currentIndex + 1],
-                      isBackCard: true,
+                  Expanded(
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        if (_currentIndex + 1 < _users.length)
+                          _buildSwipeCard(
+                            _users[_currentIndex + 1],
+                            isBackCard: true,
+                          ),
+                        _buildSwipeCard(_users[_currentIndex]),
+                      ],
                     ),
-                  _buildSwipeCard(_users[_currentIndex]),
+                  ),
+                  _buildActionButtons(
+                    likeProgress: likeProgress,
+                    dislikeProgress: dislikeProgress,
+                    favoriteProgress: favoriteProgress,
+                  ),
                 ],
-              ),
-            ),
-            _buildActionButtons(
-              likeProgress: likeProgress,
-              dislikeProgress: dislikeProgress,
-              favoriteProgress: favoriteProgress,
-            ),
-          ],
-        );
+              );
       },
-    );
-  }
-
-  /// Browse/search mode - the old Home feed, folded in here so discovery
-  /// lives in exactly one place.
-  Widget _buildListMode() {
-    if (_isLoading) return _buildLoadingState();
-    final results = _searchResults;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'Search people or skills...',
-              prefixIcon: Icon(Icons.search, color: context.sw.give),
-              suffixIcon: _searchQuery.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        _searchController.clear();
-                        setState(() => _searchQuery = '');
-                      },
-                    )
-                  : null,
-              filled: true,
-              fillColor: Theme.of(context).colorScheme.surface,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(color: context.sw.border),
-              ),
-            ),
-            onChanged: (value) => setState(() => _searchQuery = value),
-          ),
-        ),
-        Expanded(
-          child: results.isEmpty
-              ? _buildEmptyState()
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: results.length,
-                  itemBuilder: (context, index) {
-                    final user = results[index];
-                    // Stagger-fade so the list assembles rather than snapping in.
-                    return TweenAnimationBuilder<double>(
-                      key: ValueKey(user['id']),
-                      tween: Tween(begin: 0, end: 1),
-                      duration: Duration(milliseconds: 250 + (index % 6) * 60),
-                      curve: Curves.easeOut,
-                      builder: (context, value, child) => Opacity(
-                        opacity: value,
-                        child: Transform.translate(
-                          offset: Offset(0, 12 * (1 - value)),
-                          child: child,
-                        ),
-                      ),
-                      child: _buildListTile(user),
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildListTile(Map<String, dynamic> user) {
-    final offered = List<String>.from(user['skillsOffered'] ?? []);
-    final percent = (user['matchPercent'] as double?) ?? 0;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        leading: Hero(
-          tag: 'avatar_${user['id']}',
-          child: CircleAvatar(
-            radius: 24,
-            backgroundColor: context.sw.give.withValues(alpha: 0.12),
-            backgroundImage: (user['photoUrl'] as String?)?.isNotEmpty == true
-                ? NetworkImage(user['photoUrl'])
-                : null,
-            child: (user['photoUrl'] as String?)?.isNotEmpty == true
-                ? null
-                : Icon(Icons.person, color: context.sw.give),
-          ),
-        ),
-        title: Text(user['name'] ?? 'Anonymous',
-            style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(
-          offered.isEmpty ? 'No skills listed' : 'Teaches ${offered.join(', ')}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: percent > 0
-            ? Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: context.sw.give.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '${percent.round()}%',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: context.sw.give),
-                ),
-              )
-            : null,
-        onTap: () {
-          HapticFeedback.selectionClick();
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => UserDetailPage(userId: user['id']),
-            ),
-          );
-        },
-      ),
     );
   }
 
@@ -844,9 +850,10 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
               const Text(
                 'How to swap',
                 style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold),
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 26),
               _coachRow(Icons.arrow_forward, 'Swipe right to send a request'),
@@ -880,8 +887,10 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           ),
           const SizedBox(width: 14),
           Expanded(
-            child: Text(label,
-                style: const TextStyle(color: Colors.white, fontSize: 14.5)),
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 14.5),
+            ),
           ),
         ],
       ),
@@ -891,56 +900,110 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
   Widget _buildLoadingState() {
     // A card-shaped placeholder instead of a spinner: the wait reads as
     // "almost there" rather than "nothing is happening".
-    return _listMode ? const ListSkeleton() : const DiscoverCardSkeleton();
+    return const DiscoverCardSkeleton();
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SwapMotif(width: 180),
-            const SizedBox(height: 26),
-            Text(
-              'No more matches found',
-              style: AppTheme.display(fontSize: 23, color: context.sw.text),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _searchQuery.isNotEmpty
-                  ? 'Nothing matched "$_searchQuery". Try a different skill or clear the search.'
-                  : "You've seen everyone for now. Adding more skills you want to "
-                      'learn widens your matches straight away.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: context.sw.textMuted),
-            ),
-            const SizedBox(height: 32),
-            // Every empty state should name the next action, not dead-end.
-            ElevatedButton.icon(
-              onPressed: () {
-                HapticFeedback.selectionClick();
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ProfileSetupPage()),
-                );
-              },
-              icon: const Icon(Icons.edit),
-              label: const Text('Update my skills'),
-              style: ElevatedButton.styleFrom(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+    // Scrolls when space runs short (small screens, the extra Explore
+    // button) instead of overflowing; stays centred when it fits.
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SwapMotif(width: 180),
+                  const SizedBox(height: 26),
+                  Text(
+                    _verifiedOnly
+                        ? 'No more verified members'
+                        : _exploreMode
+                        ? "That's everyone for now"
+                        : 'No more skill matches',
+                    style: AppTheme.display(
+                      fontSize: 23,
+                      color: context.sw.text,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _verifiedOnly
+                        ? 'Verified members have confirmed both their email and phone. '
+                              'Show everyone to see the rest.'
+                        : _exploreMode
+                        ? "You've seen everyone active right now. New people join every day."
+                        : "You've seen everyone who teaches what you want or wants what you "
+                              'teach. Explore everyone else, or add skills to widen your matches.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: context.sw.textMuted),
+                  ),
+                  const SizedBox(height: 32),
+                  if (_verifiedOnly) ...[
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _verifiedOnly = false);
+                        _loadUsers(explore: _exploreMode);
+                      },
+                      icon: const Icon(Icons.people_alt_rounded),
+                      label: const Text('Show everyone'),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  if (!_exploreMode) ...[
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        _loadUsers(explore: true);
+                      },
+                      icon: const Icon(Icons.travel_explore_rounded),
+                      label: const Text('Explore everyone'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 28,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  // Every empty state should name the next action, not dead-end.
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      HapticFeedback.selectionClick();
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ProfileSetupPage(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.edit),
+                    label: const Text('Update my skills'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 28,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton.icon(
+                    onPressed: () => _loadUsers(),
+                    icon: const Icon(Icons.refresh),
+                    label: Text(
+                      _exploreMode ? 'Back to my matches' : 'Refresh',
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 10),
-            TextButton.icon(
-              onPressed: _loadUsers,
-              icon: const Icon(Icons.refresh),
-              label: const Text("Refresh"),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -1027,13 +1090,20 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: (filled ? actionColor : Colors.black).withValues(alpha: 0.18),
+                  color: (filled ? actionColor : Colors.black).withValues(
+                    alpha: 0.18,
+                  ),
                   blurRadius: 16,
                   offset: const Offset(0, 6),
                 ),
               ],
             ),
-            child: Icon(icon, color: iconColor, size: size * 0.42, semanticLabel: label),
+            child: Icon(
+              icon,
+              color: iconColor,
+              size: size * 0.42,
+              semanticLabel: label,
+            ),
           ),
         ),
       ),
@@ -1090,8 +1160,10 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
   }
 
   Widget _buildLikeOverlay() {
-    final opacity =
-    (_dragX / (MediaQuery.of(context).size.width * 0.4)).clamp(0.0, 1.0);
+    final opacity = (_dragX / (MediaQuery.of(context).size.width * 0.4)).clamp(
+      0.0,
+      1.0,
+    );
     return Positioned(
       top: 40,
       left: 20,
@@ -1102,9 +1174,10 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-                border: Border.all(color: context.sw.give, width: 3),
-                borderRadius: BorderRadius.circular(10),
-                color: Colors.white.withValues(alpha: 0.9)),
+              border: Border.all(color: context.sw.give, width: 3),
+              borderRadius: BorderRadius.circular(10),
+              color: Colors.white.withValues(alpha: 0.9),
+            ),
             child: Text(
               "LIKE",
               style: GoogleFonts.manrope(
@@ -1120,8 +1193,10 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
   }
 
   Widget _buildDislikeOverlay() {
-    final opacity =
-    (-_dragX / (MediaQuery.of(context).size.width * 0.4)).clamp(0.0, 1.0);
+    final opacity = (-_dragX / (MediaQuery.of(context).size.width * 0.4)).clamp(
+      0.0,
+      1.0,
+    );
     return Positioned(
       top: 40,
       right: 20,
@@ -1132,9 +1207,10 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-                border: Border.all(color: context.sw.get, width: 3),
-                borderRadius: BorderRadius.circular(10),
-                color: Colors.white.withValues(alpha: 0.9)),
+              border: Border.all(color: context.sw.get, width: 3),
+              borderRadius: BorderRadius.circular(10),
+              color: Colors.white.withValues(alpha: 0.9),
+            ),
             child: Text(
               "NOPE",
               style: GoogleFonts.manrope(
@@ -1150,8 +1226,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
   }
 
   Widget _buildFavoriteOverlay() {
-    final opacity =
-    (_dragY.abs() / (MediaQuery.of(context).size.height * 0.3))
+    final opacity = (_dragY.abs() / (MediaQuery.of(context).size.height * 0.3))
         .clamp(0.0, 1.0);
     return Positioned.fill(
       child: Align(
@@ -1162,9 +1237,10 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
             margin: const EdgeInsets.symmetric(vertical: 40),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xFF86A89B), width: 3),
-                borderRadius: BorderRadius.circular(10),
-                color: Colors.white.withValues(alpha: 0.9)),
+              border: Border.all(color: const Color(0xFF86A89B), width: 3),
+              borderRadius: BorderRadius.circular(10),
+              color: Colors.white.withValues(alpha: 0.9),
+            ),
             child: Text(
               "FAVORITE",
               style: GoogleFonts.manrope(
@@ -1196,8 +1272,12 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
     // What each side would get out of it, in the viewer's own terms.
     final theyTeach = List<String>.from(user['theyTeachIWant'] ?? []);
     final iTeach = List<String>.from(user['iTeachTheyWant'] ?? []);
-    final youGet = theyTeach.isNotEmpty ? theyTeach.first : (skillsOffered.isNotEmpty ? skillsOffered.first : '');
-    final youGive = iTeach.isNotEmpty ? iTeach.first : (skillsWanted.isNotEmpty ? skillsWanted.first : '');
+    final youGet = theyTeach.isNotEmpty
+        ? theyTeach.first
+        : (skillsOffered.isNotEmpty ? skillsOffered.first : '');
+    final youGive = iTeach.isNotEmpty
+        ? iTeach.first
+        : (skillsWanted.isNotEmpty ? skillsWanted.first : '');
 
     return SizedBox(
       width: MediaQuery.of(context).size.width * 0.88,
@@ -1228,7 +1308,11 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
                     if (photo.isEmpty)
                       Container(
                         color: c.surfaceLow,
-                        child: Icon(Icons.person_rounded, size: 76, color: c.textMuted),
+                        child: Icon(
+                          Icons.person_rounded,
+                          size: 76,
+                          color: c.textMuted,
+                        ),
                       )
                     else
                       CachedNetworkImage(
@@ -1241,7 +1325,11 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
                         ),
                         errorWidget: (context, url, error) => Container(
                           color: c.surfaceLow,
-                          child: Icon(Icons.person_rounded, size: 76, color: c.textMuted),
+                          child: Icon(
+                            Icons.person_rounded,
+                            size: 76,
+                            color: c.textMuted,
+                          ),
                         ),
                       ),
                     if (matchPercent > 0)
@@ -1249,7 +1337,10 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
                         top: 14,
                         left: 14,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 7,
+                          ),
                           decoration: BoxDecoration(
                             color: c.win,
                             borderRadius: BorderRadius.circular(14),
@@ -1257,16 +1348,21 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.bolt_rounded, size: 14, color: c.onWin),
+                              Icon(
+                                Icons.bolt_rounded,
+                                size: 14,
+                                color: c.onWin,
+                              ),
                               const SizedBox(width: 4),
                               CountUpText(
                                 value: matchPercent.round(),
                                 suffix: '% match',
                                 duration: const Duration(milliseconds: 700),
                                 style: GoogleFonts.manrope(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w800,
-                                    color: c.onWin),
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: c.onWin,
+                                ),
                               ),
                             ],
                           ),
@@ -1284,21 +1380,41 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
                       Row(
                         children: [
                           Expanded(
-                            child: Text(name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppTheme.display(fontSize: 25, color: c.text)),
+                            child: Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTheme.display(
+                                      fontSize: 25,
+                                      color: c.text,
+                                    ),
+                                  ),
+                                ),
+                                if (user['verified'] == true) ...[
+                                  const SizedBox(width: 6),
+                                  const VerifiedSeal(size: 20),
+                                ],
+                              ],
+                            ),
                           ),
                           if (completedSwaps > 0) ...[
-                            Icon(Icons.verified_rounded, size: 15, color: c.success),
+                            Icon(
+                              Icons.verified_rounded,
+                              size: 15,
+                              color: c.success,
+                            ),
                             const SizedBox(width: 4),
                             Text(
                               '$completedSwaps swap${completedSwaps == 1 ? '' : 's'}'
                               '${rating > 0 ? ' · ${rating.toStringAsFixed(1)}★' : ''}',
                               style: GoogleFonts.manrope(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w800,
-                                  color: c.success),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                                color: c.success,
+                              ),
                             ),
                           ],
                         ],
@@ -1321,11 +1437,17 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               if (bio.isNotEmpty)
-                                Text(bio,
-                                    style: GoogleFonts.manrope(
-                                        fontSize: 13, color: c.textMuted, height: 1.45)),
+                                Text(
+                                  bio,
+                                  style: GoogleFonts.manrope(
+                                    fontSize: 13,
+                                    color: c.textMuted,
+                                    height: 1.45,
+                                  ),
+                                ),
                               if (matchPercent > 0) _buildMatchBreakdown(user),
-                              if (skillsOffered.length > 1 || skillsWanted.length > 1) ...[
+                              if (skillsOffered.length > 1 ||
+                                  skillsWanted.length > 1) ...[
                                 const SizedBox(height: 12),
                                 Wrap(
                                   spacing: 6,
@@ -1342,14 +1464,22 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
                                 const SizedBox(height: 12),
                                 Row(
                                   children: [
-                                    Icon(Icons.schedule_rounded, size: 14, color: c.textMuted),
+                                    Icon(
+                                      Icons.schedule_rounded,
+                                      size: 14,
+                                      color: c.textMuted,
+                                    ),
                                     const SizedBox(width: 6),
                                     Expanded(
-                                      child: Text('Free ${availability.join(', ')}',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: GoogleFonts.manrope(
-                                              fontSize: 12, color: c.textMuted)),
+                                      child: Text(
+                                        'Free ${availability.join(', ')}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.manrope(
+                                          fontSize: 12,
+                                          color: c.textMuted,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -1378,9 +1508,14 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
         borderRadius: BorderRadius.circular(11),
         border: Border(left: BorderSide(color: color, width: 3)),
       ),
-      child: Text(label,
-          style: GoogleFonts.manrope(
-              fontSize: 11.5, fontWeight: FontWeight.w700, color: c.text)),
+      child: Text(
+        label,
+        style: GoogleFonts.manrope(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: c.text,
+        ),
+      ),
     );
   }
 
@@ -1391,20 +1526,31 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
   Widget _buildMatchBreakdown(Map<String, dynamic> user) {
     final theyTeach = List<String>.from(user['theyTeachIWant'] ?? []);
     final iTeach = List<String>.from(user['iTeachTheyWant'] ?? []);
-    final sharedAvailability = List<String>.from(user['sharedAvailability'] ?? []);
+    final sharedAvailability = List<String>.from(
+      user['sharedAvailability'] ?? [],
+    );
     final reasons = <Widget>[];
 
     if (theyTeach.isNotEmpty) {
-      reasons.add(_matchReasonChip(
-          Icons.auto_fix_high, 'Teaches ${theyTeach.join(', ')}'));
+      reasons.add(
+        _matchReasonChip(
+          Icons.auto_fix_high,
+          'Teaches ${theyTeach.join(', ')}',
+        ),
+      );
     }
     if (iTeach.isNotEmpty) {
       reasons.add(
-          _matchReasonChip(Icons.favorite_border, 'Wants ${iTeach.join(', ')}'));
+        _matchReasonChip(Icons.favorite_border, 'Wants ${iTeach.join(', ')}'),
+      );
     }
     if (sharedAvailability.isNotEmpty) {
-      reasons.add(_matchReasonChip(Icons.access_time,
-          'Free ${sharedAvailability.join(', ')}'));
+      reasons.add(
+        _matchReasonChip(
+          Icons.access_time,
+          'Free ${sharedAvailability.join(', ')}',
+        ),
+      );
     }
 
     return Padding(
@@ -1412,7 +1558,8 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (reasons.isNotEmpty) Wrap(spacing: 6, runSpacing: 6, children: reasons),
+          if (reasons.isNotEmpty)
+            Wrap(spacing: 6, runSpacing: 6, children: reasons),
         ],
       ),
     );
@@ -1431,12 +1578,16 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
         children: [
           Icon(icon, size: 12, color: c.get),
           const SizedBox(width: 4),
-          Text(label,
-              style: GoogleFonts.manrope(
-                  fontSize: 11, fontWeight: FontWeight.w700, color: c.get)),
+          Text(
+            label,
+            style: GoogleFonts.manrope(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: c.get,
+            ),
+          ),
         ],
       ),
     );
   }
-
 }

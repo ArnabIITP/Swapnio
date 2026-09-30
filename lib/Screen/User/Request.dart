@@ -14,6 +14,8 @@ import '../../ui/session_actions.dart';
 import '../../ui/swapnio_badges.dart';
 import '../../ui/swapnio_kit.dart';
 import '../../ui/swapnio_widgets.dart';
+import '../../services/app_nav.dart';
+import 'calendar_page.dart';
 import 'session_detail.dart';
 import 'chat_page.dart';
 
@@ -62,31 +64,35 @@ class _RequestPageState extends State<RequestPage>
         .orderBy('timestamp', descending: true)
         .snapshots()
         .listen((snap) {
-      if (mounted) setState(() => _requestsSnapshot = snap);
-    });
+          if (mounted) setState(() => _requestsSnapshot = snap);
+        });
     _chatsSub = FirebaseFirestore.instance
         .collection('chatRooms')
         .where('users', arrayContains: currentUserId)
         .orderBy('lastMessageTime', descending: true)
         .snapshots()
         .listen((snap) {
-      if (mounted) setState(() => _chatsSnapshot = snap);
-    });
-    _sessionsSub = SwapSessionService.instance.mySessionsStream().listen((snap) {
+          if (mounted) setState(() => _chatsSnapshot = snap);
+        });
+    _sessionsSub = SwapSessionService.instance.mySessionsStream().listen((
+      snap,
+    ) {
       if (mounted) setState(() => _sessionsSnapshot = snap);
     });
 
-    // Mark notifications as read when opening this page
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final appState = Provider.of<AppState>(context, listen: false);
-      if (appState.unreadNotifications > 0) {
-        appState.markNotificationsAsRead();
-      }
-    });
+    AppNav.inboxTab.addListener(_followNav);
+    final pending = AppNav.inboxTab.value;
+    if (pending != null) _tabController.index = pending;
+  }
+
+  void _followNav() {
+    final t = AppNav.inboxTab.value;
+    if (t != null && mounted) _tabController.animateTo(t);
   }
 
   @override
   void dispose() {
+    AppNav.inboxTab.removeListener(_followNav);
     _requestsSub?.cancel();
     _chatsSub?.cancel();
     _sessionsSub?.cancel();
@@ -233,14 +239,23 @@ class _RequestPageState extends State<RequestPage>
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
       padding: const EdgeInsets.symmetric(horizontal: 26),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(24)),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(24),
+      ),
       alignment: alignLeft ? Alignment.centerLeft : Alignment.centerRight,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: foreground),
           const SizedBox(width: 8),
-          Text(label, style: GoogleFonts.manrope(color: foreground, fontWeight: FontWeight.w800)),
+          Text(
+            label,
+            style: GoogleFonts.manrope(
+              color: foreground,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
         ],
       ),
     );
@@ -257,13 +272,20 @@ class _RequestPageState extends State<RequestPage>
     final theyTeach = list(data['skillsOffered']);
     final theyWant = list(data['skillsWanted']);
     if (me == null) {
-      return theyTeach.isNotEmpty ? 'Teaches ${theyTeach.first}' : 'Liked your profile';
+      return theyTeach.isNotEmpty
+          ? 'Teaches ${theyTeach.first}'
+          : 'Liked your profile';
     }
     final myWant = me.skillsWanted.map((e) => e.toLowerCase()).toSet();
     final myTeach = me.skillsOffered.map((e) => e.toLowerCase()).toSet();
-    final give = theyTeach.where((t) => myWant.contains(t.toLowerCase())).toList();
-    final get = theyWant.where((t) => myTeach.contains(t.toLowerCase())).toList();
-    if (give.isNotEmpty && get.isNotEmpty) return 'Teaches ${give.first}, wants your ${get.first}';
+    final give = theyTeach
+        .where((t) => myWant.contains(t.toLowerCase()))
+        .toList();
+    final get = theyWant
+        .where((t) => myTeach.contains(t.toLowerCase()))
+        .toList();
+    if (give.isNotEmpty && get.isNotEmpty)
+      return 'Teaches ${give.first}, wants your ${get.first}';
     if (give.isNotEmpty) return 'Teaches ${give.first} - on your wishlist';
     if (get.isNotEmpty) return 'Wants to learn your ${get.first}';
     if (theyTeach.isNotEmpty) return 'Teaches ${theyTeach.first}';
@@ -295,27 +317,71 @@ class _RequestPageState extends State<RequestPage>
       body: SafeArea(
         bottom: false,
         child: currentUserId.isEmpty
-            ? const Center(child: Text('Please log in to view requests and chats.'))
+            ? const Center(
+                child: Text('Please log in to view requests and chats.'),
+              )
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-                    child: Text('Inbox', style: AppTheme.display(fontSize: 34, color: c.text)),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Inbox',
+                            style: AppTheme.display(
+                              fontSize: 34,
+                              color: c.text,
+                            ),
+                          ),
+                        ),
+                        Semantics(
+                          label: 'Calendar',
+                          button: true,
+                          child: Pressable(
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const CalendarPage(),
+                              ),
+                            ),
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: c.surface,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.calendar_month_rounded,
+                                color: c.text,
+                                size: 21,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-                    child: Builder(builder: (context) {
-                      final n = (_requestsSnapshot?.docs ?? const [])
-                          .where((d) => !_hiddenRequestIds.contains(d.id))
-                          .length;
-                      return Text(
-                        n == 0
-                            ? 'Requests, chats and sessions in one place'
-                            : '$n ${n == 1 ? 'person wants' : 'people want'} to swap with you',
-                        style: GoogleFonts.manrope(fontSize: 13, color: c.textMuted),
-                      );
-                    }),
+                    child: Builder(
+                      builder: (context) {
+                        final n = (_requestsSnapshot?.docs ?? const [])
+                            .where((d) => !_hiddenRequestIds.contains(d.id))
+                            .length;
+                        return Text(
+                          n == 0
+                              ? 'Requests, chats and sessions in one place'
+                              : '$n ${n == 1 ? 'person wants' : 'people want'} to swap with you',
+                          style: GoogleFonts.manrope(
+                            fontSize: 13,
+                            color: c.textMuted,
+                          ),
+                        );
+                      },
+                    ),
                   ),
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -334,14 +400,27 @@ class _RequestPageState extends State<RequestPage>
                       dividerHeight: 0,
                       labelColor: c.onCta,
                       unselectedLabelColor: c.textMuted,
-                      labelStyle: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 13.5),
-                      unselectedLabelStyle:
-                          GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13.5),
+                      labelStyle: GoogleFonts.manrope(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13.5,
+                      ),
+                      unselectedLabelStyle: GoogleFonts.manrope(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                      ),
                       splashBorderRadius: BorderRadius.circular(12),
-                      tabs: const [
-                        Tab(height: 40, text: 'Requests'),
-                        Tab(height: 40, text: 'Chats'),
-                        Tab(height: 40, text: 'Sessions'),
+                      tabs: [
+                        _countTab(
+                          'Requests',
+                          (_requestsSnapshot?.docs ?? const [])
+                              .where((d) => !_hiddenRequestIds.contains(d.id))
+                              .length,
+                        ),
+                        _countTab(
+                          'Chats',
+                          context.watch<AppState>().unreadChats,
+                        ),
+                        const Tab(height: 40, text: 'Sessions'),
                       ],
                     ),
                   ),
@@ -362,6 +441,37 @@ class _RequestPageState extends State<RequestPage>
     );
   }
 
+  /// A tab label with a small count bubble when there's something new.
+  Widget _countTab(String label, int count) => Tab(
+    height: 40,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label),
+        if (count > 0) ...[
+          const SizedBox(width: 6),
+          Container(
+            constraints: const BoxConstraints(minWidth: 18),
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: context.sw.give,
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Text(
+              count > 99 ? '99+' : '$count',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.manrope(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
+
   Future<void> _rescheduleSession(String swapId, Map<String, dynamic> data) =>
       rescheduleSessionFlow(context, swapId, data);
 
@@ -372,6 +482,7 @@ class _RequestPageState extends State<RequestPage>
     List<String> participants, {
     Map<String, dynamic>? rawData,
   }) {
+    final data = rawData ?? const <String, dynamic>{};
     if (status == 'pending') {
       if (isMine) {
         return Row(
@@ -385,11 +496,15 @@ class _RequestPageState extends State<RequestPage>
               ),
             ),
             TextButton(
+              onPressed: () => rescheduleSessionFlow(context, swapId, data),
+              child: const Text('Change time'),
+            ),
+            TextButton(
               onPressed: () {
                 HapticFeedback.selectionClick();
-                SwapSessionService.instance.updateStatus(swapId, 'declined');
+                cancelSessionFlow(context, swapId, data);
               },
-              child: const Text('Cancel'),
+              child: const Text('Withdraw'),
             ),
           ],
         );
@@ -400,7 +515,13 @@ class _RequestPageState extends State<RequestPage>
             child: OutlinedButton(
               onPressed: () {
                 HapticFeedback.selectionClick();
-                SwapSessionService.instance.updateStatus(swapId, 'declined');
+                answerProposalFlow(
+                  context,
+                  swapId,
+                  accept: false,
+                  otherUserId: sessionOtherId(data),
+                  otherName: sessionOtherFirstName(data),
+                );
               },
               child: const Text('Decline'),
             ),
@@ -410,7 +531,13 @@ class _RequestPageState extends State<RequestPage>
             child: ElevatedButton(
               onPressed: () {
                 HapticFeedback.mediumImpact();
-                SwapSessionService.instance.updateStatus(swapId, 'accepted');
+                answerProposalFlow(
+                  context,
+                  swapId,
+                  accept: true,
+                  otherUserId: sessionOtherId(data),
+                  otherName: sessionOtherFirstName(data),
+                );
               },
               child: const Text('Accept'),
             ),
@@ -420,40 +547,52 @@ class _RequestPageState extends State<RequestPage>
     }
 
     if (status == 'accepted') {
+      final started = data['startedAt'] != null;
       return Column(
         children: [
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () =>
-                  _completeSessionWithOutcome(swapId, participants),
-              icon: const Icon(Icons.check_circle_outline, size: 18),
-              label: const Text('Mark as completed'),
+          if (!started) RescheduleRequestBanner(swapId: swapId, data: data),
+          if (rawData != null)
+            SessionTimerPanel(
+              swapId: swapId,
+              data: rawData,
+              onRate: () => _tabController.animateTo(1),
             ),
-          ),
-          Row(
-            children: [
-              Expanded(
-                child: TextButton.icon(
-                  onPressed: rawData == null
-                      ? null
-                      : () => _rescheduleSession(swapId, rawData),
-                  icon: const Icon(Icons.edit_calendar, size: 18),
-                  label: const Text('Reschedule'),
-                ),
-              ),
-              Expanded(
-                child: TextButton.icon(
-                  onPressed: () => _confirmNoShow(swapId),
-                  style: TextButton.styleFrom(
-                    foregroundColor: context.sw.textMuted,
+          // Once both have checked in the session is happening: it can't be
+          // moved or reported as a no-show any more (the rules enforce this);
+          // the ✕ on the timer stops it in the first 30 minutes instead.
+          if (!started)
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: data['pendingReschedule'] != null
+                        ? null
+                        : () => _rescheduleSession(swapId, data),
+                    icon: const Icon(Icons.edit_calendar, size: 18),
+                    label: const Text('Reschedule'),
                   ),
-                  icon: const Icon(Icons.event_busy, size: 18),
-                  label: const Text("Didn't happen"),
                 ),
-              ),
-            ],
-          ),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: () => cancelSessionFlow(context, swapId, data),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.redAccent,
+                    ),
+                    icon: const Icon(Icons.event_busy, size: 18),
+                    label: const Text('Cancel'),
+                  ),
+                ),
+                IconButton(
+                  tooltip: "Didn't happen",
+                  onPressed: () => _confirmNoShow(swapId),
+                  icon: Icon(
+                    Icons.person_off_outlined,
+                    size: 20,
+                    color: context.sw.textMuted,
+                  ),
+                ),
+              ],
+            ),
         ],
       );
     }
@@ -466,6 +605,25 @@ class _RequestPageState extends State<RequestPage>
           Expanded(
             child: Text(
               'Swap finished - open the chat to leave a rating',
+              style: TextStyle(fontSize: 13, color: context.sw.textMuted),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (status == 'cancelled') {
+      final by = data['cancelledBy'] == FirebaseAuth.instance.currentUser?.uid
+          ? 'You'
+          : 'They';
+      final reason = (data['cancelReason'] as String? ?? '').trim();
+      return Row(
+        children: [
+          Icon(Icons.event_busy, size: 16, color: context.sw.textMuted),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '$by cancelled${reason.isEmpty ? '' : ': "$reason"'}',
               style: TextStyle(fontSize: 13, color: context.sw.textMuted),
             ),
           ),
@@ -491,10 +649,8 @@ class _RequestPageState extends State<RequestPage>
     return const SizedBox.shrink();
   }
 
-  Future<void> _completeSessionWithOutcome(String swapId, List<String> participants) =>
-      completeSessionFlow(context, swapId, participants, onRate: () => _tabController.animateTo(1));
-
-  Future<void> _confirmNoShow(String swapId) => confirmNoShowFlow(context, swapId);
+  Future<void> _confirmNoShow(String swapId) =>
+      confirmNoShowFlow(context, swapId);
 
   Widget _buildSessionsTab() {
     if (_sessionsSnapshot == null) {
@@ -552,6 +708,10 @@ class _RequestPageState extends State<RequestPage>
         statusColor = c.textMuted;
         statusLabel = 'No-show';
         break;
+      case 'cancelled':
+        statusColor = c.textMuted;
+        statusLabel = 'Cancelled';
+        break;
       default:
         statusColor = c.give;
         statusLabel = 'Pending';
@@ -581,7 +741,10 @@ class _RequestPageState extends State<RequestPage>
         ),
         child: Container(
           padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(24)),
+          decoration: BoxDecoration(
+            color: c.surface,
+            borderRadius: BorderRadius.circular(24),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -590,11 +753,16 @@ class _RequestPageState extends State<RequestPage>
                   SwapAvatar(name: otherName, size: 40, radius: 14),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text(otherName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.manrope(
-                            fontSize: 15.5, fontWeight: FontWeight.w800, color: c.text)),
+                    child: Text(
+                      otherName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.manrope(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                        color: c.text,
+                      ),
+                    ),
                   ),
                   TintTag(statusLabel, color: statusColor),
                 ],
@@ -607,26 +775,49 @@ class _RequestPageState extends State<RequestPage>
                   Icon(Icons.schedule_rounded, size: 15, color: c.textMuted),
                   const SizedBox(width: 6),
                   Expanded(
-                    child: Text(whenText,
-                        style: GoogleFonts.manrope(
-                            fontSize: 12.5, fontWeight: FontWeight.w700, color: c.text)),
-                  ),
-                  Text('Details',
+                    child: Text(
+                      whenText,
                       style: GoogleFonts.manrope(
-                          fontSize: 12, fontWeight: FontWeight.w800, color: c.get)),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: c.text,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    'Details',
+                    style: GoogleFonts.manrope(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: c.get,
+                    ),
+                  ),
                   Icon(Icons.chevron_right_rounded, size: 18, color: c.get),
                 ],
               ),
-              if ((data['sessionNotes'] as String? ?? '').trim().isNotEmpty) ...[
+              if ((data['sessionNotes'] as String? ?? '')
+                  .trim()
+                  .isNotEmpty) ...[
                 const SizedBox(height: 10),
-                Text(data['sessionNotes'] as String,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.manrope(
-                        fontSize: 12.5, fontStyle: FontStyle.italic, color: c.textMuted)),
+                Text(
+                  data['sessionNotes'] as String,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.manrope(
+                    fontSize: 12.5,
+                    fontStyle: FontStyle.italic,
+                    color: c.textMuted,
+                  ),
+                ),
               ],
               const SizedBox(height: 12),
-              _buildSessionActions(swapId, status, isMine, participants, rawData: data),
+              _buildSessionActions(
+                swapId,
+                status,
+                isMine,
+                participants,
+                rawData: data,
+              ),
             ],
           ),
         ),
@@ -646,7 +837,8 @@ class _RequestPageState extends State<RequestPage>
         icon: Icons.favorite_border_rounded,
         useSwapMotif: true,
         title: 'No requests yet',
-        message: 'Requests show up here when someone likes you. Liking people '
+        message:
+            'Requests show up here when someone likes you. Liking people '
             'first is the fastest way to get there.',
         actionLabel: 'Start discovering',
         onAction: () => widget.onNavigateToTab?.call(1),
@@ -664,13 +856,23 @@ class _RequestPageState extends State<RequestPage>
               children: [
                 Icon(Icons.west_rounded, size: 14, color: c.textMuted),
                 const SizedBox(width: 4),
-                Text('Swipe to decline',
-                    style: GoogleFonts.manrope(
-                        fontSize: 11.5, fontWeight: FontWeight.w800, color: c.textMuted)),
+                Text(
+                  'Swipe to decline',
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                    color: c.textMuted,
+                  ),
+                ),
                 const Spacer(),
-                Text('Swipe to accept',
-                    style: GoogleFonts.manrope(
-                        fontSize: 11.5, fontWeight: FontWeight.w800, color: c.give)),
+                Text(
+                  'Swipe to accept',
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                    color: c.give,
+                  ),
+                ),
                 const SizedBox(width: 4),
                 Icon(Icons.east_rounded, size: 14, color: c.give),
               ],
@@ -720,62 +922,103 @@ class _RequestPageState extends State<RequestPage>
     final name = rawName.isEmpty ? 'Swapnio user' : rawName;
     final rawAvailability = data['availability'];
     final availability = rawAvailability is List
-        ? rawAvailability.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).join(', ')
+        ? rawAvailability
+              .map((e) => e.toString())
+              .where((e) => e.trim().isNotEmpty)
+              .join(', ')
         : (rawAvailability ?? '').toString().trim();
-    Widget button(String label, Color bg, Color fg, VoidCallback onTap) => Expanded(
+    Widget button(String label, Color bg, Color fg, VoidCallback onTap) =>
+        Expanded(
           child: Pressable(
             onTap: onTap,
             child: Container(
               height: 46,
               alignment: Alignment.center,
-              decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
-              child: Text(label,
-                  style: GoogleFonts.manrope(
-                      fontSize: 14, fontWeight: FontWeight.w800, color: fg)),
+              decoration: BoxDecoration(
+                color: bg,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Text(
+                label,
+                style: GoogleFonts.manrope(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: fg,
+                ),
+              ),
             ),
           ),
         );
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(24)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(24),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SwapAvatar(name: name, photoUrl: data['fromPhoto'] as String?, size: 48, radius: 16),
+              SwapAvatar(
+                name: name,
+                photoUrl: data['fromPhoto'] as String?,
+                size: 48,
+                radius: 16,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(name,
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.manrope(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                        color: c.text,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TintTag(
+                      _matchReason(data),
+                      color: c.get,
+                      icon: Icons.bolt_rounded,
+                    ),
+                    if (availability.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Free: $availability',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.manrope(
-                            fontSize: 15.5, fontWeight: FontWeight.w800, color: c.text)),
-                    const SizedBox(height: 6),
-                    TintTag(_matchReason(data), color: c.get, icon: Icons.bolt_rounded),
-                    if (availability.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text('Free: $availability',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted)),
+                          fontSize: 12,
+                          color: c.textMuted,
+                        ),
+                      ),
                     ],
                   ],
                 ),
               ),
-              Text(_shortAgo(data['timestamp'] as Timestamp?),
-                  style: GoogleFonts.manrope(fontSize: 11.5, color: c.textMuted)),
+              Text(
+                _shortAgo(data['timestamp'] as Timestamp?),
+                style: GoogleFonts.manrope(fontSize: 11.5, color: c.textMuted),
+              ),
             ],
           ),
           const SizedBox(height: 14),
           Row(
             children: [
-              button('Decline', c.surfaceLow, c.textMuted, () => _rejectRequest(docId)),
+              button(
+                'Decline',
+                c.surfaceLow,
+                c.textMuted,
+                () => _rejectRequest(docId),
+              ),
               const SizedBox(width: 10),
               button('Accept', c.cta, c.onCta, () {
                 setState(() => _hiddenRequestIds.add(docId));
@@ -793,14 +1036,17 @@ class _RequestPageState extends State<RequestPage>
       return _buildLoadingShimmer();
     }
     final chatRooms = (_chatsSnapshot?.docs ?? const [])
-        .where((doc) => (doc.data() as Map<String, dynamic>)['unmatched'] != true)
+        .where(
+          (doc) => (doc.data() as Map<String, dynamic>)['unmatched'] != true,
+        )
         .toList();
     if (chatRooms.isEmpty) {
       return _buildEmptyState(
         icon: Icons.chat_bubble_outline_rounded,
         useSwapMotif: true,
         title: 'No chats yet',
-        message: 'Chats open up once you and someone else both say yes. '
+        message:
+            'Chats open up once you and someone else both say yes. '
             'Find someone whose skills match yours.',
         actionLabel: 'Start discovering',
         onAction: () => widget.onNavigateToTab?.call(1),
@@ -814,18 +1060,24 @@ class _RequestPageState extends State<RequestPage>
         final data = chatRooms[index].data() as Map<String, dynamic>;
         final chatRoomId = chatRooms[index].id;
         final users = List<String>.from(data['users'] ?? []);
-        final otherUserId = users.firstWhere((id) => id != currentUserId, orElse: () => '');
+        final otherUserId = users.firstWhere(
+          (id) => id != currentUserId,
+          orElse: () => '',
+        );
         if (otherUserId.isEmpty) return const SizedBox.shrink();
 
         final userNames = data['userNames'] as Map<String, dynamic>?;
         final userPhotos = data['userPhotos'] as Map<String, dynamic>?;
         final otherUserName = (userNames?[otherUserId] ?? 'User').toString();
         final otherUserPhoto = (userPhotos?[otherUserId] ?? '').toString();
-        final lastMessage = (data['lastMessage'] as String?) ?? 'No messages yet';
+        final lastMessage =
+            (data['lastMessage'] as String?) ?? 'No messages yet';
         final lastMessageTime = data['lastMessageTime'] as Timestamp?;
         final unreadCount =
-            ((data['unreadCount'] as Map<String, dynamic>?)?[currentUserId] as num?)?.toInt() ??
-                0;
+            ((data['unreadCount'] as Map<String, dynamic>?)?[currentUserId]
+                    as num?)
+                ?.toInt() ??
+            0;
         final unread = unreadCount > 0;
 
         return Padding(
@@ -845,12 +1097,18 @@ class _RequestPageState extends State<RequestPage>
             ),
             child: Container(
               padding: const EdgeInsets.all(14),
-              decoration:
-                  BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(20)),
+              decoration: BoxDecoration(
+                color: c.surface,
+                borderRadius: BorderRadius.circular(20),
+              ),
               child: Row(
                 children: [
                   SwapAvatar(
-                      name: otherUserName, photoUrl: otherUserPhoto, size: 50, radius: 17),
+                    name: otherUserName,
+                    photoUrl: otherUserPhoto,
+                    size: 50,
+                    radius: 17,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -859,45 +1117,65 @@ class _RequestPageState extends State<RequestPage>
                         Row(
                           children: [
                             Expanded(
-                              child: Text(otherUserName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.manrope(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w800,
-                                      color: c.text)),
-                            ),
-                            Text(_shortAgo(lastMessageTime),
+                              child: Text(
+                                otherUserName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.manrope(
-                                    fontSize: 11.5,
-                                    fontWeight: unread ? FontWeight.w800 : FontWeight.w500,
-                                    color: unread ? c.give : c.textMuted)),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                  color: c.text,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              _shortAgo(lastMessageTime),
+                              style: GoogleFonts.manrope(
+                                fontSize: 11.5,
+                                fontWeight: unread
+                                    ? FontWeight.w800
+                                    : FontWeight.w500,
+                                color: unread ? c.give : c.textMuted,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 4),
                         Row(
                           children: [
                             Expanded(
-                              child: Text(lastMessage,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.manrope(
-                                      fontSize: 13,
-                                      fontWeight: unread ? FontWeight.w700 : FontWeight.w500,
-                                      color: unread ? c.text : c.textMuted)),
+                              child: Text(
+                                lastMessage,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.manrope(
+                                  fontSize: 13,
+                                  fontWeight: unread
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  color: unread ? c.text : c.textMuted,
+                                ),
+                              ),
                             ),
                             if (unread) ...[
                               const SizedBox(width: 8),
                               Container(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 7,
+                                  vertical: 2,
+                                ),
                                 decoration: BoxDecoration(
-                                    color: c.give, borderRadius: BorderRadius.circular(10)),
-                                child: Text(unreadCount > 99 ? '99+' : '$unreadCount',
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold)),
+                                  color: c.give,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  unreadCount > 99 ? '99+' : '$unreadCount',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ),
                             ],
                           ],
@@ -928,44 +1206,68 @@ class _RequestPageState extends State<RequestPage>
     bool useSwapMotif = false,
   }) {
     final c = context.sw;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (useSwapMotif)
-              const SwapMotif(width: 176)
-            else
-              HexTile(icon: icon, size: 92),
-            const SizedBox(height: 22),
-            Text(title,
-                textAlign: TextAlign.center,
-                style: AppTheme.display(fontSize: 22, color: c.text)),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.manrope(fontSize: 13.5, color: c.textMuted, height: 1.45),
-            ),
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 22),
-              Pressable(
-                onTap: onAction,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 15),
-                  decoration:
-                      BoxDecoration(color: c.cta, borderRadius: BorderRadius.circular(16)),
-                  child: Text(actionLabel,
-                      style: GoogleFonts.manrope(
-                          fontSize: 14, fontWeight: FontWeight.w800, color: c.onCta)),
-                ),
+    // Scrolls when space runs short (e.g. with the keyboard open) instead of
+    // overflowing; stays centred when it fits.
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (useSwapMotif)
+                    const SwapMotif(width: 176)
+                  else
+                    HexTile(icon: icon, size: 92),
+                  const SizedBox(height: 22),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: AppTheme.display(fontSize: 22, color: c.text),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.manrope(
+                      fontSize: 13.5,
+                      color: c.textMuted,
+                      height: 1.45,
+                    ),
+                  ),
+                  if (actionLabel != null && onAction != null) ...[
+                    const SizedBox(height: 22),
+                    Pressable(
+                      onTap: onAction,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 22,
+                          vertical: 15,
+                        ),
+                        decoration: BoxDecoration(
+                          color: c.cta,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Text(
+                          actionLabel,
+                          style: GoogleFonts.manrope(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: c.onCta,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-            ],
-          ],
+            ),
+          ),
         ),
       ),
     );
   }
-
 }

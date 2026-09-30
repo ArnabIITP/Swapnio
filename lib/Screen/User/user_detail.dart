@@ -53,20 +53,21 @@ class _UserDetailPageState extends State<UserDetailPage> {
 
   Future<void> _loadUserData() async {
     setState(() => _isLoading = true);
-    
+
     try {
       // Load user data
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(widget.userId)
           .get();
-      
+
       if (userDoc.exists) {
         setState(() {
           _userData = userDoc.data();
           _userData!['id'] = widget.userId;
-          _privacy =
-              Map<String, dynamic>.from(_userData!['privacy'] ?? const {});
+          _privacy = Map<String, dynamic>.from(
+            _userData!['privacy'] ?? const {},
+          );
         });
       }
 
@@ -78,11 +79,22 @@ class _UserDetailPageState extends State<UserDetailPage> {
           final chatRoomId = me.compareTo(widget.userId) < 0
               ? '${me}_${widget.userId}'
               : '${widget.userId}_$me';
-          final chatRoomDoc = await FirebaseFirestore.instance
-              .collection('chatRooms')
-              .doc(chatRoomId)
-              .get();
-          if (mounted) setState(() => _isMatch = chatRoomDoc.exists);
+          // The chatRooms rule can only allow reading a room you're in, so
+          // for two people who haven't matched (no room yet) Firestore
+          // answers permission-denied rather than "not found". That means
+          // "not matched" - it must not fall through to the outer handler,
+          // which would wrongly show the profile as private.
+          bool matched = false;
+          try {
+            final chatRoomDoc = await FirebaseFirestore.instance
+                .collection('chatRooms')
+                .doc(chatRoomId)
+                .get();
+            matched = chatRoomDoc.exists;
+          } on FirebaseException catch (e) {
+            if (e.code != 'permission-denied') rethrow;
+          }
+          if (mounted) setState(() => _isMatch = matched);
         }
       }
 
@@ -100,19 +112,19 @@ class _UserDetailPageState extends State<UserDetailPage> {
           .orderBy('timestamp', descending: true)
           .limit(10)
           .get();
-          
+
       final reviewsList = <Map<String, dynamic>>[];
-      
+
       for (final doc in reviewsSnapshot.docs) {
         final reviewData = doc.data();
-        
+
         // Get reviewer name and photo
         try {
           final reviewerDoc = await FirebaseFirestore.instance
               .collection('users')
               .doc(reviewData['fromUserId'])
               .get();
-          
+
           if (reviewerDoc.exists) {
             final reviewerData = reviewerDoc.data()!;
             reviewData['reviewerName'] = reviewerData['name'] ?? 'Anonymous';
@@ -125,10 +137,10 @@ class _UserDetailPageState extends State<UserDetailPage> {
           reviewData['reviewerName'] = 'Anonymous';
           reviewData['reviewerPhoto'] = '';
         }
-        
+
         reviewsList.add(reviewData);
       }
-      
+
       setState(() {
         _reviews = reviewsList;
         _isLoading = false;
@@ -162,27 +174,28 @@ class _UserDetailPageState extends State<UserDetailPage> {
         .collection('profileViews')
         .doc('${widget.userId}_${me}_$day')
         .set({
-      'viewedUserId': widget.userId,
-      'viewerId': me,
-      'day': day,
-      'timestamp': FieldValue.serverTimestamp(),
-    }).catchError((_) {});
+          'viewedUserId': widget.userId,
+          'viewerId': me,
+          'day': day,
+          'timestamp': FieldValue.serverTimestamp(),
+        })
+        .catchError((_) {});
   }
 
   Future<void> _sendSwapRequest() async {
     final currentUser = FirebaseAuth.instance.currentUser;
-    
+
     if (currentUser == null || _userData == null) return;
-    
+
     setState(() => _sendingRequest = true);
-    
+
     try {
       // Get current user data
       final currentUserDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUser.uid)
           .get();
-          
+
       if (!currentUserDoc.exists) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -191,9 +204,9 @@ class _UserDetailPageState extends State<UserDetailPage> {
         setState(() => _sendingRequest = false);
         return;
       }
-      
+
       final currentUserData = currentUserDoc.data()!;
-      
+
       // Create swap request
       await FirebaseFirestore.instance.collection('swipeRequests').add({
         'fromUserId': currentUser.uid,
@@ -206,18 +219,19 @@ class _UserDetailPageState extends State<UserDetailPage> {
         'availability': currentUserData['availability'] ?? [],
         'timestamp': FieldValue.serverTimestamp(),
       });
-      
+
       // Add notification
       await FirebaseFirestore.instance.collection('notifications').add({
         'userId': widget.userId,
         'type': 'swap_request',
-        'message': '${currentUser.displayName ?? "Someone"} wants to swap skills with you',
+        'message':
+            '${currentUser.displayName ?? "Someone"} wants to swap skills with you',
         'timestamp': FieldValue.serverTimestamp(),
         'read': false,
         'senderName': currentUser.displayName ?? "Anonymous",
         'senderPhoto': currentUser.photoURL ?? "",
       });
-      
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Swap request sent successfully!')),
@@ -226,27 +240,27 @@ class _UserDetailPageState extends State<UserDetailPage> {
     } catch (e) {
       print('Error sending swap request: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to send request: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to send request: $e')));
       setState(() => _sendingRequest = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-  return Scaffold(
-    backgroundColor: context.sw.bg,
-    body: _isLoading
-      ? const Center(child: CircularProgressIndicator())
-      : _permissionDenied
-        ? _buildPrivateProfileState()
-        : _userData == null
+    return Scaffold(
+      backgroundColor: context.sw.bg,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _permissionDenied
+          ? _buildPrivateProfileState()
+          : _userData == null
           ? const Center(child: Text('User not found'))
           : !_profileVisible
-            ? _buildPrivateProfileState()
-            : _buildUserProfile(),
-  );
+          ? _buildPrivateProfileState()
+          : _buildUserProfile(),
+    );
   }
 
   /// Shows up-front how reliably this person actually turns up. Only shown
@@ -266,8 +280,9 @@ class _UserDetailPageState extends State<UserDetailPage> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: (isReliable ? context.sw.give : Colors.redAccent)
-                .withValues(alpha: 0.1),
+            color: (isReliable ? context.sw.give : Colors.redAccent).withValues(
+              alpha: 0.1,
+            ),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: (isReliable ? context.sw.give : Colors.redAccent)
@@ -300,32 +315,48 @@ class _UserDetailPageState extends State<UserDetailPage> {
 
   Widget _buildPrivateProfileState() {
     final visibility = _privacy['profileVisibility'] ?? 'public';
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.lock_outline, size: 64, color: context.sw.border),
-            const SizedBox(height: 16),
-            Text(
-              'This profile is private',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: context.sw.text,
+    // This screen has no app bar, so it needs its own way back.
+    return SafeArea(
+      child: Stack(
+        children: [
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.lock_outline, size: 64, color: context.sw.border),
+                  const SizedBox(height: 16),
+                  Text(
+                    'This profile is private',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: context.sw.text,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    visibility == 'matches'
+                        ? 'This user only shares their profile with people they\'ve matched with.'
+                        : 'This user has chosen to keep their profile private.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: context.sw.textMuted),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              visibility == 'matches'
-                  ? 'This user only shares their profile with people they\'ve matched with.'
-                  : 'This user has chosen to keep their profile private.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: context.sw.textMuted),
+          ),
+          Positioned(
+            top: 4,
+            left: 4,
+            child: IconButton(
+              tooltip: 'Back',
+              icon: Icon(Icons.arrow_back_rounded, color: context.sw.text),
+              onPressed: () => Navigator.maybePop(context),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -357,9 +388,16 @@ class _UserDetailPageState extends State<UserDetailPage> {
             child: Pressable(
               onTap: () => Navigator.of(context).maybePop(),
               child: Container(
-                decoration: BoxDecoration(color: context.sw.surface, shape: BoxShape.circle),
-                child: Icon(Icons.arrow_back_rounded,
-                    size: 20, color: context.sw.text, semanticLabel: 'Back'),
+                decoration: BoxDecoration(
+                  color: context.sw.surface,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.arrow_back_rounded,
+                  size: 20,
+                  color: context.sw.text,
+                  semanticLabel: 'Back',
+                ),
               ),
             ),
           ),
@@ -376,10 +414,16 @@ class _UserDetailPageState extends State<UserDetailPage> {
                   child: Container(
                     width: 40,
                     height: 40,
-                    decoration:
-                        BoxDecoration(color: context.sw.surface, shape: BoxShape.circle),
-                    child: Icon(Icons.more_horiz_rounded,
-                        size: 20, color: context.sw.text, semanticLabel: 'More options'),
+                    decoration: BoxDecoration(
+                      color: context.sw.surface,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.more_horiz_rounded,
+                      size: 20,
+                      color: context.sw.text,
+                      semanticLabel: 'More options',
+                    ),
                   ),
                 ),
               ),
@@ -402,6 +446,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
                         photoUrl: (_userData!['photoUrl'] ?? '').toString(),
                         size: 104,
                         radius: 34,
+                        verified: _userData!['verified'] == true,
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -409,7 +454,10 @@ class _UserDetailPageState extends State<UserDetailPage> {
                       _userData!['name'] ?? 'Anonymous',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: AppTheme.display(fontSize: 30, color: context.sw.text),
+                      style: AppTheme.display(
+                        fontSize: 30,
+                        color: context.sw.text,
+                      ),
                     ),
                   ],
                 ),
@@ -436,10 +484,8 @@ class _UserDetailPageState extends State<UserDetailPage> {
                       itemCount: 5,
                       itemSize: 24,
                       ignoreGestures: true,
-                      itemBuilder: (context, _) => Icon(
-                        Icons.star,
-                        color: context.sw.give,
-                      ),
+                      itemBuilder: (context, _) =>
+                          Icon(Icons.star, color: context.sw.give),
                       onRatingUpdate: (_) {},
                     ),
                     const SizedBox(width: 10),
@@ -466,12 +512,18 @@ class _UserDetailPageState extends State<UserDetailPage> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.email_outlined,
-                            size: 16, color: Colors.grey),
+                        const Icon(
+                          Icons.email_outlined,
+                          size: 16,
+                          color: Colors.grey,
+                        ),
                         const SizedBox(width: 6),
                         Text(
                           _userData!['email'],
-                          style: TextStyle(color: context.sw.textMuted, fontSize: 14),
+                          style: TextStyle(
+                            color: context.sw.textMuted,
+                            fontSize: 14,
+                          ),
                         ),
                       ],
                     ),
@@ -489,7 +541,10 @@ class _UserDetailPageState extends State<UserDetailPage> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text(_userData!['bio'].toString(), style: const TextStyle(fontSize: 15)),
+                  Text(
+                    _userData!['bio'].toString(),
+                    style: const TextStyle(fontSize: 15),
+                  ),
                   const SizedBox(height: 22),
                 ],
                 // Skills Section
@@ -532,7 +587,9 @@ class _UserDetailPageState extends State<UserDetailPage> {
                   Text(
                     'This user has chosen not to share their skills.',
                     style: TextStyle(
-                        fontStyle: FontStyle.italic, color: context.sw.textMuted),
+                      fontStyle: FontStyle.italic,
+                      color: context.sw.textMuted,
+                    ),
                   ),
                   const SizedBox(height: 20),
                 ],
@@ -556,17 +613,30 @@ class _UserDetailPageState extends State<UserDetailPage> {
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: availability.map((day) => Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: context.sw.get.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: context.sw.get.withValues(alpha: 0.3),
-                        ),
-                      ),
-                      child: Text(day, style: TextStyle(fontSize: 13, color: context.sw.get)),
-                    )).toList(),
+                    children: availability
+                        .map(
+                          (day) => Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: context.sw.get.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(
+                                color: context.sw.get.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            child: Text(
+                              day,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: context.sw.get,
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
                   ),
                   const SizedBox(height: 22),
                 ],
@@ -579,8 +649,20 @@ class _UserDetailPageState extends State<UserDetailPage> {
                       onPressed: _sendingRequest ? null : _sendSwapRequest,
                       icon: const Icon(Icons.swap_horiz, color: Colors.white),
                       label: _sendingRequest
-                          ? const Text('Sending...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600))
-                          : const Text('Send Swap Request', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                          ? const Text(
+                              'Sending...',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            )
+                          : const Text(
+                              'Send Swap Request',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: context.sw.give,
                         shape: RoundedRectangleBorder(
@@ -609,124 +691,131 @@ class _UserDetailPageState extends State<UserDetailPage> {
         ),
         // Reviews list
         SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (context, index) {
-              if (_reviews.isEmpty) {
-                return const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(18),
-                    child: Text('No reviews yet', style: TextStyle(fontSize: 15)),
-                  ),
-                );
-              }
-              final review = _reviews[index];
-              final reviewerName = review['reviewerName'] ?? 'Anonymous';
-              final reviewerPhoto = review['reviewerPhoto'] ?? '';
-              final rating = (review['rating'] ?? 0.0).toDouble();
-              final reviewText = review['review'] ?? '';
-              final tags = List<String>.from(review['tags'] ?? []);
-              final timestamp = review['timestamp'] as Timestamp?;
-              return SurfaceCard(
-                margin: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          CachedNetworkImage(
-                            imageUrl: reviewerPhoto,
-                            imageBuilder: (context, imageProvider) => CircleAvatar(
-                              radius: 22,
-                              backgroundImage: imageProvider,
-                            ),
-                            placeholder: (context, url) => CircleAvatar(
-                              radius: 22,
-                              backgroundColor: context.sw.border,
-                              child: const Icon(Icons.person, size: 22, color: Colors.grey),
-                            ),
-                            errorWidget: (context, url, error) => CircleAvatar(
-                              radius: 22,
-                              backgroundColor: context.sw.border,
-                              child: const Icon(Icons.person, size: 22, color: Colors.grey),
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                reviewerName,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                              ),
-                              if (timestamp != null)
-                                Text(
-                                  _formatDate(timestamp.toDate()),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: context.sw.textMuted,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      RatingBar.builder(
-                        initialRating: rating,
-                        minRating: 0,
-                        direction: Axis.horizontal,
-                        allowHalfRating: true,
-                        itemCount: 5,
-                        itemSize: 16,
-                        ignoreGestures: true,
-                        itemBuilder: (context, _) => Icon(
-                          Icons.star,
-                          color: context.sw.give,
-                        ),
-                        onRatingUpdate: (_) {},
-                      ),
-                      if (tags.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: tags
-                              .map((tag) => Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: context.sw.get
-                                          .withValues(alpha: 0.1),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      tag,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: context.sw.get,
-                                      ),
-                                    ),
-                                  ))
-                              .toList(),
-                        ),
-                      ],
-                      if (reviewText.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(reviewText, style: const TextStyle(fontSize: 14)),
-                      ],
-                    ],
+          delegate: SliverChildBuilderDelegate((context, index) {
+            if (_reviews.isEmpty) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(18),
+                  child: Text('No reviews yet', style: TextStyle(fontSize: 15)),
                 ),
               );
-            },
-            childCount: _reviews.isEmpty ? 1 : _reviews.length,
-          ),
+            }
+            final review = _reviews[index];
+            final reviewerName = review['reviewerName'] ?? 'Anonymous';
+            final reviewerPhoto = review['reviewerPhoto'] ?? '';
+            final rating = (review['rating'] ?? 0.0).toDouble();
+            final reviewText = review['review'] ?? '';
+            final tags = List<String>.from(review['tags'] ?? []);
+            final timestamp = review['timestamp'] as Timestamp?;
+            return SurfaceCard(
+              margin: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CachedNetworkImage(
+                        imageUrl: reviewerPhoto,
+                        imageBuilder: (context, imageProvider) => CircleAvatar(
+                          radius: 22,
+                          backgroundImage: imageProvider,
+                        ),
+                        placeholder: (context, url) => CircleAvatar(
+                          radius: 22,
+                          backgroundColor: context.sw.border,
+                          child: const Icon(
+                            Icons.person,
+                            size: 22,
+                            color: Colors.grey,
+                          ),
+                        ),
+                        errorWidget: (context, url, error) => CircleAvatar(
+                          radius: 22,
+                          backgroundColor: context.sw.border,
+                          child: const Icon(
+                            Icons.person,
+                            size: 22,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            reviewerName,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
+                          ),
+                          if (timestamp != null)
+                            Text(
+                              _formatDate(timestamp.toDate()),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: context.sw.textMuted,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  RatingBar.builder(
+                    initialRating: rating,
+                    minRating: 0,
+                    direction: Axis.horizontal,
+                    allowHalfRating: true,
+                    itemCount: 5,
+                    itemSize: 16,
+                    ignoreGestures: true,
+                    itemBuilder: (context, _) =>
+                        Icon(Icons.star, color: context.sw.give),
+                    onRatingUpdate: (_) {},
+                  ),
+                  if (tags.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: tags
+                          .map(
+                            (tag) => Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: context.sw.get.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                tag,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: context.sw.get,
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ],
+                  if (reviewText.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(reviewText, style: const TextStyle(fontSize: 14)),
+                  ],
+                ],
+              ),
+            );
+          }, childCount: _reviews.isEmpty ? 1 : _reviews.length),
         ),
         // Bottom padding
-        const SliverToBoxAdapter(
-          child: SizedBox(height: 36),
-        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 36)),
       ],
     );
   }
@@ -741,37 +830,41 @@ class _UserDetailPageState extends State<UserDetailPage> {
         ),
       );
     }
-    
+
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: skills.map((skill) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: isOffered 
-              ? context.sw.give.withValues(alpha: 0.1) 
-              : context.sw.get.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isOffered
-                ? context.sw.give.withValues(alpha: 0.3)
-                : context.sw.get.withValues(alpha: 0.3),
-          ),
-        ),
-        child: Text(
-          skill,
-          style: TextStyle(
-            color: isOffered ? context.sw.give : context.sw.get,
-          ),
-        ),
-      )).toList(),
+      children: skills
+          .map(
+            (skill) => Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: isOffered
+                    ? context.sw.give.withValues(alpha: 0.1)
+                    : context.sw.get.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isOffered
+                      ? context.sw.give.withValues(alpha: 0.3)
+                      : context.sw.get.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Text(
+                skill,
+                style: TextStyle(
+                  color: isOffered ? context.sw.give : context.sw.get,
+                ),
+              ),
+            ),
+          )
+          .toList(),
     );
   }
-  
+
   String _formatDate(DateTime date) {
     final now = DateTime.now();
     final difference = now.difference(date);
-    
+
     if (difference.inDays < 1) {
       return 'Today';
     } else if (difference.inDays < 2) {

@@ -35,8 +35,10 @@ class MatchResult {
 class MatchService {
   MatchService._();
 
-  static Set<String> _normalized(List<String> items) =>
-      items.map((s) => s.trim().toLowerCase()).where((s) => s.isNotEmpty).toSet();
+  static Set<String> _normalized(List<String> items) => items
+      .map((s) => s.trim().toLowerCase())
+      .where((s) => s.isNotEmpty)
+      .toSet();
 
   static MatchResult compute({
     required List<String> mySkillsOffered,
@@ -64,7 +66,8 @@ class MatchService {
     const maxAvailabilityCredit = 3;
     const maxRatingBonus = 2;
 
-    final rawScore = teachWeight * theyTeachIWant.length +
+    final rawScore =
+        teachWeight * theyTeachIWant.length +
         learnWeight * iTeachTheyWant.length +
         availabilityWeight *
             sharedAvailability.length.clamp(0, maxAvailabilityCredit) +
@@ -73,7 +76,8 @@ class MatchService {
     // Normalize against the best this candidate COULD score given how many
     // skills I'm actually looking for/offering, so wanting 2 skills and
     // getting both matched scores much higher than wanting 10 and getting 1.
-    final maxPossible = teachWeight * myWanted.length.clamp(1, 10) +
+    final maxPossible =
+        teachWeight * myWanted.length.clamp(1, 10) +
         learnWeight * myOffered.length.clamp(1, 10) +
         availabilityWeight * maxAvailabilityCredit +
         maxRatingBonus;
@@ -82,12 +86,24 @@ class MatchService {
         ? 0.0
         : (rawScore / maxPossible * 100).clamp(0, 100).toDouble();
 
+    // Matching is case-insensitive, but the chips should show the skill as
+    // it's actually written ("Machine Learning", not "machine learning").
+    List<String> original(List<String> source, Set<String> matched) {
+      final seen = <String>{};
+      return [
+        for (final s in source)
+          if (matched.contains(s.trim().toLowerCase()) &&
+              seen.add(s.trim().toLowerCase()))
+            s.trim(),
+      ];
+    }
+
     return MatchResult(
       rawScore: rawScore,
       percent: percent,
-      theyTeachIWant: theyTeachIWant.toList(),
-      iTeachTheyWant: iTeachTheyWant.toList(),
-      sharedAvailability: sharedAvailability.toList(),
+      theyTeachIWant: original(candidateSkillsOffered, theyTeachIWant),
+      iTeachTheyWant: original(mySkillsOffered, iTeachTheyWant),
+      sharedAvailability: original(myAvailability, sharedAvailability),
     );
   }
 }

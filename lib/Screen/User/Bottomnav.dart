@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -11,8 +12,14 @@ import 'package:swapnio/Screen/User/setup.dart';
 import 'package:swapnio/Screen/User/Swap.dart';
 import 'package:swapnio/Screen/User/profile.dart';
 import 'package:swapnio/providers/app_state.dart';
+import '../../services/skill_catalog_service.dart';
 import 'Request.dart';
 import '../../theme.dart';
+import '../../services/referral_service.dart';
+import '../../features/streak/daily_streak.dart';
+import '../../services/app_nav.dart';
+import '../../services/device_service.dart';
+import '../../ui/two_factor_gate.dart';
 
 class BottomNavPage extends StatefulWidget {
   const BottomNavPage({super.key});
@@ -21,23 +28,87 @@ class BottomNavPage extends StatefulWidget {
   State<BottomNavPage> createState() => _BottomNavPageState();
 }
 
-class _BottomNavPageState extends State<BottomNavPage> {
+class _BottomNavPageState extends State<BottomNavPage>
+    with WidgetsBindingObserver {
   int _selectedIndex = 0;
   bool _setupPromptShown = false;
   final GlobalKey _bodyKey = GlobalKey();
   bool _offline = false;
   Timer? _connectivityTimer;
+  // Two-factor is on and this device hasn't entered a code yet.
+  bool _needsCode = false;
+  final StreakCelebrator _streakCelebrator = StreakCelebrator();
 
   @override
   void initState() {
     super.initState();
     _checkConnectivity();
     _scheduleConnectivityPoll();
+    // Warm the skill catalog (and seed/upgrade it on first run after a
+    // deploy) so skill pickers and matching have it ready.
+    SkillCatalogService.instance.ensureLoaded();
+    WidgetsBinding.instance.addObserver(this);
+    AppNav.tab.addListener(_followNav);
+    // Daily streak: days end at this phone's midnight, and keeping one is
+    // celebrated wherever the user is in the app.
+    StreakService.syncTimezone();
+    _streakCelebrator.start(context);
+    _deviceCheck(force: true).then((_) {
+      // Registered (and marked online) - keep the presence heartbeat going.
+      DeviceService.instance.goOnline();
+      // If this install came from someone's QR, credit them (day-1 accounts
+      // only - the server decides).
+      ReferralService.instance.claimInstallReferrerOnce();
+      // Keep the verified ring in step with Firebase Auth (email link
+      // tapped, phone linked on another device, ...).
+      FirebaseFunctions.instance
+          .httpsCallable('syncVerification')
+          .call()
+          .then<void>((_) {}, onError: (_) {});
+    });
+  }
+
+  void _followNav() {
+    final t = AppNav.tab.value;
+    if (t != null && t != _selectedIndex && mounted) {
+      setState(() => _selectedIndex = t);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _deviceCheck();
+        DeviceService.instance.goOnline();
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        DeviceService.instance.goOffline();
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+        break;
+    }
+  }
+
+  /// Registers this device and applies what the server says: signed out
+  /// remotely -> sign out here too; 2FA on and not yet verified -> code gate.
+  Future<void> _deviceCheck({bool force = false}) async {
+    final result = await DeviceService.instance.checkIn(force: force);
+    if (!mounted) return;
+    if (result == DeviceCheck.revoked) {
+      await DeviceService.instance.signOutRevoked();
+    } else if (result == DeviceCheck.needsCode && !_needsCode) {
+      setState(() => _needsCode = true);
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    AppNav.tab.removeListener(_followNav);
+    _streakCelebrator.dispose();
     _connectivityTimer?.cancel();
+    DeviceService.instance.goOffline();
     super.dispose();
   }
 
@@ -57,8 +128,9 @@ class _BottomNavPageState extends State<BottomNavPage> {
   Future<void> _checkConnectivity() async {
     bool offline;
     try {
-      final result = await InternetAddress.lookup('firestore.googleapis.com')
-          .timeout(const Duration(seconds: 2));
+      final result = await InternetAddress.lookup(
+        'firestore.googleapis.com',
+      ).timeout(const Duration(seconds: 2));
       offline = result.isEmpty || result.first.rawAddress.isEmpty;
     } catch (_) {
       offline = true;
@@ -120,9 +192,15 @@ class _BottomNavPageState extends State<BottomNavPage> {
 
   @override
   Widget build(BuildContext context) {
-    final unread = Provider.of<AppState>(context).unreadNotifications;
+    final unread = Provider.of<AppState>(context).inboxBadge;
     final theme = Theme.of(context);
     final appState = Provider.of<AppState>(context);
+
+    if (_needsCode) {
+      return TwoFactorGate(
+        onVerified: () => setState(() => _needsCode = false),
+      );
+    }
 
     // Onboarding gate: send brand-new profiles (no skills offered yet) through
     // the setup flow exactly once, so the feed isn't full of empty cards.
@@ -152,15 +230,24 @@ class _BottomNavPageState extends State<BottomNavPage> {
                       bottom: false,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 6),
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
                         child: Row(
                           children: const [
-                            Icon(Icons.cloud_off, size: 16, color: Colors.white),
+                            Icon(
+                              Icons.cloud_off,
+                              size: 16,
+                              color: Colors.white,
+                            ),
                             SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 "You're offline - changes will sync when you reconnect",
-                                style: TextStyle(color: Colors.white, fontSize: 12.5),
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12.5,
+                                ),
                               ),
                             ),
                           ],
@@ -173,10 +260,7 @@ class _BottomNavPageState extends State<BottomNavPage> {
           Expanded(
             child: KeyedSubtree(
               key: _bodyKey,
-              child: IndexedStack(
-                index: _selectedIndex,
-                children: _screens,
-              ),
+              child: IndexedStack(index: _selectedIndex, children: _screens),
             ),
           ),
         ],
@@ -259,8 +343,14 @@ class _BottomNavPageState extends State<BottomNavPage> {
                       right: -7,
                       top: -5,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 1,
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 16,
+                          minHeight: 16,
+                        ),
                         decoration: BoxDecoration(
                           color: c.give,
                           borderRadius: BorderRadius.circular(8),

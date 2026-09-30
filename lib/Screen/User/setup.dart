@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 import '../../providers/app_state.dart';
 import '../../services/match_service.dart';
 import '../../services/skill_catalog_service.dart';
+import '../../ui/skill_request.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../theme.dart';
@@ -64,8 +65,10 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
   Future<void> _loadCandidates() async {
     final me = FirebaseAuth.instance.currentUser?.uid;
     try {
-      final snapshot =
-          await FirebaseFirestore.instance.collection('users').limit(100).get();
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .limit(100)
+          .get();
       if (!mounted) return;
       setState(() {
         _candidates = snapshot.docs
@@ -98,12 +101,22 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     super.dispose();
   }
 
-  void _add(TextEditingController controller, List<String> target) {
-    final value = SkillCatalogService.instance.canonicalize(controller.text);
-    if (value.isEmpty ||
-        target.any((s) => s.toLowerCase() == value.toLowerCase())) {
+  Future<void> _add(
+    TextEditingController controller,
+    List<String> target,
+  ) async {
+    // Only catalog skills can be added; anything else becomes a request.
+    final value = await resolveOrRequestSkill(
+      context,
+      controller.text,
+      offered: identical(target, _offers),
+    );
+    if (!mounted) return;
+    if (value == null) {
+      controller.clear();
       return;
     }
+    if (target.any((s) => s.toLowerCase() == value.toLowerCase())) return;
     setState(() {
       target.add(value);
       controller.clear();
@@ -134,7 +147,9 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     final current = app.currentUser;
     if (current == null || _name.text.trim().isEmpty || _offers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add your name and at least one skill you teach.')),
+        const SnackBar(
+          content: Text('Add your name and at least one skill you teach.'),
+        ),
       );
       return;
     }
@@ -145,25 +160,31 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       // profile's own availability editor all read as weekday names.
       var updated = current.copyWith(
         name: _name.text.trim(),
-        bio: '${_headline.text.trim()} ${_location.text.trim()} ${_bio.text.trim()}'.trim(),
+        bio:
+            '${_headline.text.trim()} ${_location.text.trim()} ${_bio.text.trim()}'
+                .trim(),
         skillsOffered: List.of(_offers),
         skillsWanted: List.of(_learns),
       );
       if (!await app.updateUserProfile(updated)) {
         throw StateError(app.error);
       }
-      await FirebaseFirestore.instance.collection('users').doc(current.id).set(
-        {'experienceLevel': _experience},
-        SetOptions(merge: true),
-      );
+      await FirebaseFirestore.instance.collection('users').doc(current.id).set({
+        'experienceLevel': _experience,
+        // Kept on its own too, for Swap Web's "same city or campus" filter.
+        if (_location.text.trim().isNotEmpty) 'city': _location.text.trim(),
+      }, SetOptions(merge: true));
       if (_photo != null) await app.uploadProfileImage(_photo!);
       if (_resume != null) await app.uploadResume(_resume!);
       final goal = _goal.text.trim();
       if (goal.isNotEmpty) {
-        await FirebaseFirestore.instance.collection('users').doc(current.id).set(
-          {'monthlyGoal': goal, 'monthlyGoalSetAt': FieldValue.serverTimestamp()},
-          SetOptions(merge: true),
-        );
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(current.id)
+            .set({
+              'monthlyGoal': goal,
+              'monthlyGoalSetAt': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
       }
       if (!mounted) return;
       // Finishing onboarding is a real accomplishment - mark it, then land
@@ -209,8 +230,10 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label.toUpperCase(),
-              style: AppTheme.label(fontSize: 10, color: c.textMuted)),
+          Text(
+            label.toUpperCase(),
+            style: AppTheme.label(fontSize: 10, color: c.textMuted),
+          ),
           const SizedBox(height: 7),
           TextField(
             controller: controller,
@@ -227,7 +250,10 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
                     ),
               filled: true,
               fillColor: c.surface,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 15,
+              ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide(color: c.border),
@@ -244,7 +270,10 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
           ),
           if (helper != null) ...[
             const SizedBox(height: 6),
-            Text(helper, style: GoogleFonts.manrope(fontSize: 11.5, color: c.textMuted)),
+            Text(
+              helper,
+              style: GoogleFonts.manrope(fontSize: 11.5, color: c.textMuted),
+            ),
           ],
         ],
       ),
@@ -257,36 +286,44 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       spacing: 8,
       runSpacing: 8,
       children: values
-          .map((value) => Pressable(
-                onTap: () => setState(() => values.remove(value)),
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(12, 9, 9, 9),
-                  decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(value,
-                          style: GoogleFonts.manrope(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white)),
-                      const SizedBox(width: 6),
-                      const Icon(Icons.close_rounded, size: 15, color: Colors.white),
-                    ],
-                  ),
+          .map(
+            (value) => Pressable(
+              onTap: () => setState(() => values.remove(value)),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(12, 9, 9, 9),
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(14),
                 ),
-              ))
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      value,
+                      style: GoogleFonts.manrope(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(
+                      Icons.close_rounded,
+                      size: 15,
+                      color: Colors.white,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
           .toList(),
     );
   }
 
-
   /// Skills are chosen, not typed: tapping a suggestion avoids typos and
   /// keeps everyone's skill names matching, which is what makes search and
-  /// matching work at all. Free text still works for anything not listed.
+  /// matching work at all. Anything not listed can be requested.
   Widget _skillPicker({
     required TextEditingController controller,
     required List<String> selected,
@@ -297,12 +334,15 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     final c = context.sw;
     final color = give ? c.give : c.get;
     final query = controller.text.trim();
-    final suggestions = (query.isEmpty
-            ? SkillCatalogService.instance.curated
-            : SkillCatalogService.instance.suggestionsFor(query))
-        .where((s) => !selected.any((v) => v.toLowerCase() == s.toLowerCase()))
-        .take(8)
-        .toList();
+    final suggestions =
+        (query.isEmpty
+                ? SkillCatalogService.instance.curated
+                : SkillCatalogService.instance.suggestionsFor(query))
+            .where(
+              (s) => !selected.any((v) => v.toLowerCase() == s.toLowerCase()),
+            )
+            .take(8)
+            .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -315,7 +355,11 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
           style: GoogleFonts.manrope(color: c.text),
           decoration: InputDecoration(
             hintText: hint,
-            prefixIcon: Icon(Icons.search_rounded, size: 19, color: c.textMuted),
+            prefixIcon: Icon(
+              Icons.search_rounded,
+              size: 19,
+              color: c.textMuted,
+            ),
             suffixIcon: query.isEmpty
                 ? null
                 : IconButton(
@@ -325,7 +369,10 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
                   ),
             filled: true,
             fillColor: c.surface,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 15,
+            ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
               borderSide: BorderSide(color: c.border),
@@ -346,8 +393,10 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
         ],
         if (suggestions.isNotEmpty) ...[
           const SizedBox(height: 14),
-          Text(query.isEmpty ? 'POPULAR RIGHT NOW' : 'SUGGESTIONS',
-              style: AppTheme.label(fontSize: 10, color: c.textMuted)),
+          Text(
+            query.isEmpty ? 'POPULAR RIGHT NOW' : 'SUGGESTIONS',
+            style: AppTheme.label(fontSize: 10, color: c.textMuted),
+          ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -371,11 +420,14 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
                       children: [
                         Icon(Icons.add_rounded, size: 15, color: color),
                         const SizedBox(width: 5),
-                        Text(skill,
-                            style: GoogleFonts.manrope(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: c.text)),
+                        Text(
+                          skill,
+                          style: GoogleFonts.manrope(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: c.text,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -385,7 +437,10 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
         ],
         if (selected.isEmpty) ...[
           const SizedBox(height: 10),
-          Text(emptyHint, style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted)),
+          Text(
+            emptyHint,
+            style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted),
+          ),
         ],
       ],
     );
@@ -394,85 +449,125 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
   Widget _content() {
     switch (_step) {
       case 0:
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _field(_name, 'Full name',
-              hint: 'How people will see you', icon: Icons.person_outline_rounded),
-          _field(_headline, 'Headline',
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _field(
+              _name,
+              'Full name',
+              hint: 'How people will see you',
+              icon: Icons.person_outline_rounded,
+            ),
+            _field(
+              _headline,
+              'Headline',
               hint: 'e.g. CS student who loves teaching',
-              icon: Icons.badge_outlined),
-          _field(_location, 'Location',
-              hint: 'City or campus', icon: Icons.place_outlined),
-        ]);
+              icon: Icons.badge_outlined,
+            ),
+            _field(
+              _location,
+              'Location',
+              hint: 'City or campus',
+              icon: Icons.place_outlined,
+            ),
+          ],
+        );
       case 1:
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _skillPicker(
-            controller: _offer,
-            selected: _offers,
-            give: true,
-            hint: 'Search skills you can teach',
-            emptyHint: 'Pick at least one.',
-          ),
-          const SizedBox(height: 26),
-          Text('WHAT DO YOU WANT TO LEARN?',
-              style: AppTheme.label(fontSize: 10, color: context.sw.get)),
-          const SizedBox(height: 10),
-          _skillPicker(
-            controller: _learn,
-            selected: _learns,
-            give: false,
-            hint: 'Search skills you want',
-            emptyHint: 'Optional, but it makes matches far better.',
-          ),
-          _buildMatchTeaser(),
-        ]);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _skillPicker(
+              controller: _offer,
+              selected: _offers,
+              give: true,
+              hint: 'Search skills you can teach',
+              emptyHint: 'Pick at least one.',
+            ),
+            const SizedBox(height: 26),
+            Text(
+              'WHAT DO YOU WANT TO LEARN?',
+              style: AppTheme.label(fontSize: 10, color: context.sw.get),
+            ),
+            const SizedBox(height: 10),
+            _skillPicker(
+              controller: _learn,
+              selected: _learns,
+              give: false,
+              hint: 'Search skills you want',
+              emptyHint: 'Optional, but it makes matches far better.',
+            ),
+            _buildMatchTeaser(),
+          ],
+        );
       case 2:
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('HOW EXPERIENCED ARE YOU?',
-              style: AppTheme.label(fontSize: 10, color: context.sw.get)),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              for (final level in ['Beginner', 'Intermediate', 'Advanced', 'Expert'])
-                Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.only(right: level == 'Expert' ? 0 : 8),
-                    child: _levelChip(level),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'HOW EXPERIENCED ARE YOU?',
+              style: AppTheme.label(fontSize: 10, color: context.sw.get),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                for (final level in [
+                  'Beginner',
+                  'Intermediate',
+                  'Advanced',
+                  'Expert',
+                ])
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        right: level == 'Expert' ? 0 : 8,
+                      ),
+                      child: _levelChip(level),
+                    ),
                   ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          // Commitment and consistency: a goal stated out loud here is what
-          // the home screen holds you to later.
-          _field(_goal, 'Your goal this month',
+              ],
+            ),
+            const SizedBox(height: 24),
+            // Commitment and consistency: a goal stated out loud here is what
+            // the home screen holds you to later.
+            _field(
+              _goal,
+              'Your goal this month',
               hint: 'e.g. Play my first song on guitar',
               icon: Icons.flag_outlined,
-              helper: "Optional - we'll keep it on your home screen."),
-          _field(_bio, 'About you',
+              helper: "Optional - we'll keep it on your home screen.",
+            ),
+            _field(
+              _bio,
+              'About you',
               hint: 'A line or two about what you teach and why',
               icon: Icons.notes_rounded,
-              maxLines: 4),
-        ]);
+              maxLines: 4,
+            ),
+          ],
+        );
       default:
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _uploadTile(
-            Icons.add_a_photo_rounded,
-            'Display picture',
-            'Profiles with a photo get far more accepted swaps',
-            _photo?.path,
-            _choosePhoto,
-            give: true,
-          ),
-          const SizedBox(height: 10),
-          _uploadTile(
-            Icons.picture_as_pdf_rounded,
-            'Resume / CV',
-            'Optional - adds credibility to what you teach',
-            _resume?.path,
-            _chooseResume,
-            give: false,
-          ),
-        ]);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _uploadTile(
+              Icons.add_a_photo_rounded,
+              'Display picture',
+              'Profiles with a photo get far more accepted swaps',
+              _photo?.path,
+              _choosePhoto,
+              give: true,
+            ),
+            const SizedBox(height: 10),
+            _uploadTile(
+              Icons.picture_as_pdf_rounded,
+              'Resume / CV',
+              'Optional - adds credibility to what you teach',
+              _resume?.path,
+              _chooseResume,
+              give: false,
+            ),
+          ],
+        );
     }
   }
 
@@ -490,8 +585,12 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
         mySkillsOffered: _offers,
         mySkillsWanted: _learns,
         myAvailability: const [],
-        candidateSkillsOffered: List<String>.from(candidate['skillsOffered'] ?? []),
-        candidateSkillsWanted: List<String>.from(candidate['skillsWanted'] ?? []),
+        candidateSkillsOffered: List<String>.from(
+          candidate['skillsOffered'] ?? [],
+        ),
+        candidateSkillsWanted: List<String>.from(
+          candidate['skillsWanted'] ?? [],
+        ),
         candidateAvailability: const [],
         candidateRating: (candidate['rating'] as num?)?.toDouble() ?? 0,
       );
@@ -538,16 +637,20 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
                   Text(
                     '${bestMatch.percent.round()}% match already',
                     style: GoogleFonts.manrope(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: context.sw.onWin),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: context.sw.onWin,
+                    ),
                   ),
                   const SizedBox(height: 3),
                   Text(
                     '$firstName ${reasons.join(' and ')}. '
                     'Finish your profile to connect.',
                     style: GoogleFonts.manrope(
-                        fontSize: 12.5, color: context.sw.onWin, height: 1.35),
+                      fontSize: 12.5,
+                      color: context.sw.onWin,
+                      height: 1.35,
+                    ),
                   ),
                 ],
               ),
@@ -577,7 +680,10 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
         decoration: BoxDecoration(
           color: c.surface,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: chosen ? color : c.border, width: chosen ? 1.6 : 1),
+          border: Border.all(
+            color: chosen ? color : c.border,
+            width: chosen ? 1.6 : 1,
+          ),
         ),
         child: Row(
           children: [
@@ -588,31 +694,47 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
                 color: color.withValues(alpha: 0.13),
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: Icon(chosen ? Icons.check_rounded : icon, size: 21, color: color),
+              child: Icon(
+                chosen ? Icons.check_rounded : icon,
+                size: 21,
+                color: color,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label,
-                      style: GoogleFonts.manrope(
-                          fontSize: 14, fontWeight: FontWeight.w800, color: c.text)),
+                  Text(
+                    label,
+                    style: GoogleFonts.manrope(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: c.text,
+                    ),
+                  ),
                   const SizedBox(height: 2),
                   Text(
                     chosen ? path.split(RegExp(r'[\\/]')).last : subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.manrope(
-                        fontSize: 12, color: chosen ? color : c.textMuted),
+                      fontSize: 12,
+                      color: chosen ? color : c.textMuted,
+                    ),
                   ),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            Text(chosen ? 'Change' : 'Choose',
-                style: GoogleFonts.manrope(
-                    fontSize: 12.5, fontWeight: FontWeight.w800, color: color)),
+            Text(
+              chosen ? 'Change' : 'Choose',
+              style: GoogleFonts.manrope(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
           ],
         ),
       ),
@@ -661,7 +783,12 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       'It helps partners pitch at the right level.',
       'A photo makes a profile far more likely to get a yes.',
     ];
-    const eyebrows = ['ABOUT YOU', 'YOUR GIVE SIDE', 'YOUR LEVEL', 'ALMOST THERE'];
+    const eyebrows = [
+      'ABOUT YOU',
+      'YOUR GIVE SIDE',
+      'YOUR LEVEL',
+      'ALMOST THERE',
+    ];
 
     return Scaffold(
       backgroundColor: c.bg,
@@ -697,31 +824,57 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
                     ),
                   ],
                   const SizedBox(width: 10),
-                  Text('${_step + 1}/4',
-                      style: GoogleFonts.manrope(
-                          fontSize: 12, fontWeight: FontWeight.w800, color: c.textMuted)),
+                  Text(
+                    '${_step + 1}/4',
+                    style: GoogleFonts.manrope(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: c.textMuted,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 22),
               Align(
                 alignment: Alignment.centerLeft,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
-                    color: (_step == 1 ? c.give : c.get).withValues(alpha: 0.13),
+                    color: (_step == 1 ? c.give : c.get).withValues(
+                      alpha: 0.13,
+                    ),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text(eyebrows[_step],
-                      style: AppTheme.label(
-                          fontSize: 10, color: _step == 1 ? c.give : c.get)),
+                  child: Text(
+                    eyebrows[_step],
+                    style: AppTheme.label(
+                      fontSize: 10,
+                      color: _step == 1 ? c.give : c.get,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
-              Text(titles[_step],
-                  style: AppTheme.display(fontSize: 30, color: c.text, height: 1.1)),
+              Text(
+                titles[_step],
+                style: AppTheme.display(
+                  fontSize: 30,
+                  color: c.text,
+                  height: 1.1,
+                ),
+              ),
               const SizedBox(height: 8),
-              Text(subtitles[_step],
-                  style: GoogleFonts.manrope(fontSize: 13, color: c.textMuted, height: 1.4)),
+              Text(
+                subtitles[_step],
+                style: GoogleFonts.manrope(
+                  fontSize: 13,
+                  color: c.textMuted,
+                  height: 1.4,
+                ),
+              ),
               const SizedBox(height: 20),
               Expanded(
                 // Steps slide in from the direction you're travelling, instead
@@ -749,7 +902,9 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
               ),
               const SizedBox(height: 12),
               Pressable(
-                onTap: _saving ? null : (_step == 3 ? _finish : () => _goToStep(_step + 1)),
+                onTap: _saving
+                    ? null
+                    : (_step == 3 ? _finish : () => _goToStep(_step + 1)),
                 child: Container(
                   height: 56,
                   alignment: Alignment.center,
@@ -769,11 +924,14 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
                       : Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text(_step == 3 ? 'Finish' : 'Continue',
-                                style: GoogleFonts.manrope(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w800,
-                                    color: c.onCta)),
+                            Text(
+                              _step == 3 ? 'Finish' : 'Continue',
+                              style: GoogleFonts.manrope(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                color: c.onCta,
+                              ),
+                            ),
                             const SizedBox(width: 8),
                             Icon(
                               _step == 3

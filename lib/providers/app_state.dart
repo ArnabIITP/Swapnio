@@ -12,24 +12,60 @@ import '../features/analytics/analytics_provider.dart';
 
 class AppState extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    scopes: <String>['email'],
-  );
+  final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: <String>['email']);
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
-  
+
   UserModel? _currentUser;
   bool _loading = false;
   String _error = '';
   int _unreadNotifications = 0;
   ThemeMode _themeMode = ThemeMode.light;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
-      _notificationSubscription;
+  _notificationSubscription;
 
   UserModel? get currentUser => _currentUser;
   bool get loading => _loading;
   String get error => _error;
   int get unreadNotifications => _unreadNotifications;
+
+  /// Inbox counters (the Chats tab badge = both): requests waiting for an
+  /// answer, and unread chat messages - a proposed session arrives as a chat
+  /// message, so it counts there, not on its own.
+  int _pendingRequests = 0;
+  int _unreadChats = 0;
+  int get pendingRequests => _pendingRequests;
+  int get unreadChats => _unreadChats;
+  int get inboxBadge => _pendingRequests + _unreadChats;
+  StreamSubscription? _requestsCountSub;
+  StreamSubscription? _chatsCountSub;
+
+  void _listenToInbox(String userId) {
+    _requestsCountSub?.cancel();
+    _chatsCountSub?.cancel();
+    _requestsCountSub = _firestore
+        .collection('swipeRequests')
+        .where('toUserId', isEqualTo: userId)
+        .snapshots()
+        .listen((snap) {
+          _pendingRequests = snap.docs.length;
+          notifyListeners();
+        }, onError: (e) => debugPrint('Inbox requests count: $e'));
+    _chatsCountSub = _firestore
+        .collection('chatRooms')
+        .where('users', arrayContains: userId)
+        .snapshots()
+        .listen((snap) {
+          var total = 0;
+          for (final doc in snap.docs) {
+            final counts = doc.data()['unreadCount'];
+            if (counts is Map) total += (counts[userId] as num?)?.toInt() ?? 0;
+          }
+          _unreadChats = total;
+          notifyListeners();
+        }, onError: (e) => debugPrint('Inbox chats count: $e'));
+  }
+
   ThemeMode get themeMode => _themeMode;
 
   /// True when the profile still lacks any offered skill, so the UI can send
@@ -54,31 +90,41 @@ class AppState extends ChangeNotifier {
 
   // Listen to auth state changes and update user accordingly
   void initializeUser() {
-    _auth.authStateChanges().listen((User? user) async {
-      if (user != null) {
-        await _fetchUserData(user.uid);
-        _listenToNotificationCount(user.uid);
-        await _fetchAppearanceSettings(user.uid);
-        // Register this device for push notifications (best effort).
-        NotificationService.instance.init(user.uid);
-      } else {
+    _auth.authStateChanges().listen(
+      (User? user) async {
+        if (user != null) {
+          await _fetchUserData(user.uid);
+          _listenToNotificationCount(user.uid);
+          _listenToInbox(user.uid);
+          await _fetchAppearanceSettings(user.uid);
+          // Register this device for push notifications (best effort).
+          NotificationService.instance.init(user.uid);
+        } else {
+          _loading = false;
+          _currentUser = null;
+          _unreadNotifications = 0;
+          _notificationSubscription?.cancel();
+          _notificationSubscription = null;
+          _requestsCountSub?.cancel();
+          _chatsCountSub?.cancel();
+          _pendingRequests = 0;
+          _unreadChats = 0;
+          notifyListeners();
+        }
+      },
+      onError: (Object error) {
         _loading = false;
-        _currentUser = null;
-        _unreadNotifications = 0;
-        _notificationSubscription?.cancel();
-        _notificationSubscription = null;
+        _error = 'Authentication state could not be loaded: $error';
         notifyListeners();
-      }
-    }, onError: (Object error) {
-      _loading = false;
-      _error = 'Authentication state could not be loaded: $error';
-      notifyListeners();
-    });
+      },
+    );
   }
 
   @override
   void dispose() {
     _notificationSubscription?.cancel();
+    _requestsCountSub?.cancel();
+    _chatsCountSub?.cancel();
     super.dispose();
   }
 
@@ -91,12 +137,15 @@ class AppState extends ChangeNotifier {
         .where('userId', isEqualTo: userId)
         .where('read', isEqualTo: false)
         .snapshots()
-        .listen((snapshot) {
-      _unreadNotifications = snapshot.docs.length;
-      notifyListeners();
-    }, onError: (e) {
-      debugPrint('Error listening to notifications: $e');
-    });
+        .listen(
+          (snapshot) {
+            _unreadNotifications = snapshot.docs.length;
+            notifyListeners();
+          },
+          onError: (e) {
+            debugPrint('Error listening to notifications: $e');
+          },
+        );
   }
 
   // Fetch user data from Firestore
@@ -106,7 +155,7 @@ class AppState extends ChangeNotifier {
 
     try {
       final doc = await _firestore.collection('users').doc(userId).get();
-      
+
       if (doc.exists) {
         _currentUser = UserModel.fromMap(doc.data()!, userId);
       } else {
@@ -119,8 +168,11 @@ class AppState extends ChangeNotifier {
             name: authUser.displayName ?? 'User',
             photoUrl: authUser.photoURL ?? '',
           );
-          
-          await _firestore.collection('users').doc(userId).set(_currentUser!.toMap());
+
+          await _firestore
+              .collection('users')
+              .doc(userId)
+              .set(_currentUser!.toMap());
         }
       }
     } catch (e) {
@@ -146,7 +198,7 @@ class AppState extends ChangeNotifier {
   // Mark notifications as read
   Future<void> markNotificationsAsRead() async {
     if (_currentUser == null) return;
-    
+
     try {
       final batch = _firestore.batch();
       final snapshot = await _firestore
@@ -154,11 +206,11 @@ class AppState extends ChangeNotifier {
           .where('userId', isEqualTo: _currentUser!.id)
           .where('read', isEqualTo: false)
           .get();
-      
+
       for (var doc in snapshot.docs) {
         batch.update(doc.reference, {'read': true});
       }
-      
+
       await batch.commit();
       _unreadNotifications = 0;
       notifyListeners();
@@ -243,6 +295,10 @@ class AppState extends ChangeNotifier {
 
     try {
       debugPrint('Starting Google account selection');
+      // The plugin remembers the last account and silently reuses it, so
+      // with several Google accounts on the phone the picker never showed.
+      // Forgetting it first means the user chooses every time.
+      await _googleSignIn.signOut().catchError((_) => null);
       final GoogleSignInAccount? googleUser = await _googleSignIn
           .signIn()
           .timeout(const Duration(seconds: 45));
@@ -252,8 +308,9 @@ class AppState extends ChangeNotifier {
       }
 
       debugPrint('Google account selected: ${googleUser.email}');
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication.timeout(const Duration(seconds: 15));
+      final GoogleSignInAuthentication googleAuth = await googleUser
+          .authentication
+          .timeout(const Duration(seconds: 15));
       final OAuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
@@ -302,7 +359,10 @@ class AppState extends ChangeNotifier {
         'ageConfirmed': true,
         'termsAcceptedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-      _currentUser = _currentUser!.copyWith(acceptedTerms: true, ageConfirmed: true);
+      _currentUser = _currentUser!.copyWith(
+        acceptedTerms: true,
+        ageConfirmed: true,
+      );
       notifyListeners();
       return true;
     } catch (e) {
@@ -321,7 +381,8 @@ class AppState extends ChangeNotifier {
     required bool ageConfirmed,
   }) async {
     if (!acceptedTerms || !ageConfirmed) {
-      _error = 'Please accept the Terms & Privacy Policy and confirm you are 18 or older.';
+      _error =
+          'Please accept the Terms & Privacy Policy and confirm you are 18 or older.';
       notifyListeners();
       return false;
     }
@@ -331,7 +392,10 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final credential = await _auth.createUserWithEmailAndPassword(email: email, password: password);
+      final credential = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
 
       // Update display name
       await credential.user?.updateDisplayName(name);
@@ -350,7 +414,9 @@ class AppState extends ChangeNotifier {
         'termsAcceptedAt': FieldValue.serverTimestamp(),
       });
 
-      AnalyticsProvider.log('sign_up', credential.user!.uid, {'method': 'email'});
+      AnalyticsProvider.log('sign_up', credential.user!.uid, {
+        'method': 'email',
+      });
       _loading = false;
       return true;
     } catch (e) {
@@ -363,6 +429,7 @@ class AppState extends ChangeNotifier {
 
   // Sign out
   Future<void> signOut() async {
+    await _googleSignIn.signOut().catchError((_) => null);
     await _auth.signOut();
   }
 
@@ -373,7 +440,7 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       return false;
     }
-    
+
     _loading = true;
     notifyListeners();
 
@@ -386,15 +453,17 @@ class AppState extends ChangeNotifier {
       // while `_currentUser`'s cached copy was stale - the whole edit would
       // get rejected instead of just the fields this screen actually owns.
       final profileFields = Map<String, dynamic>.from(updatedUser.toMap())
-        ..removeWhere((key, _) => const {
-              'isAdmin',
-              'isBanned',
-              'rating',
-              'ratingsCount',
-              'completedSwaps',
-              'sessionsAttended',
-              'noShowCount',
-            }.contains(key));
+        ..removeWhere(
+          (key, _) => const {
+            'isAdmin',
+            'isBanned',
+            'rating',
+            'ratingsCount',
+            'completedSwaps',
+            'sessionsAttended',
+            'noShowCount',
+          }.contains(key),
+        );
       await _firestore
           .collection('users')
           .doc(updatedUser.id)
@@ -417,7 +486,7 @@ class AppState extends ChangeNotifier {
   // Upload profile image
   Future<String?> uploadProfileImage(File image) async {
     if (_currentUser == null) return null;
-    
+
     _loading = true;
     notifyListeners();
 
@@ -426,12 +495,12 @@ class AppState extends ChangeNotifier {
       final uploadTask = ref.putFile(image);
       final snapshot = await uploadTask;
       final downloadUrl = await snapshot.ref.getDownloadURL();
-      
+
       // Update user photo URL
       if (_currentUser != null) {
         final updatedUser = _currentUser!.copyWith(photoUrl: downloadUrl);
         await updateUserProfile(updatedUser);
-        
+
         // Also update in Firebase Auth
         await _auth.currentUser?.updatePhotoURL(downloadUrl);
       }
@@ -479,7 +548,7 @@ class AppState extends ChangeNotifier {
   // Add a new swap request
   Future<bool> sendSwapRequest(Map<String, dynamic> requestData) async {
     if (_currentUser == null) return false;
-    
+
     try {
       await _firestore.collection('swipeRequests').add(requestData);
 
@@ -496,59 +565,10 @@ class AppState extends ChangeNotifier {
         'senderName': _currentUser!.name,
         'senderPhoto': _currentUser!.photoUrl,
       });
-      
+
       return true;
     } catch (e) {
       _error = 'Failed to send request: $e';
-      print(_error);
-      return false;
-    }
-  }
-
-  // Rate a user after skill exchange
-  Future<bool> rateUser(String userId, double rating, String review) async {
-    if (_currentUser == null) return false;
-    
-    try {
-      // Add the rating document
-      await _firestore.collection('ratings').add({
-        'fromUserId': _currentUser!.id,
-        'toUserId': userId,
-        'rating': rating,
-        'review': review,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-      
-      // Update the user's average rating using a transaction: the divisor is
-      // the stored ratings count (NOT completedSwaps, which counts swaps, not
-      // ratings - both participants rate the same swap separately).
-      await _firestore.runTransaction((tx) async {
-        final userRef = _firestore.collection('users').doc(userId);
-        final userDoc = await tx.get(userRef);
-        if (!userDoc.exists) return;
-
-        final userData = userDoc.data()!;
-        final currentRating = (userData['rating'] as num?)?.toDouble() ?? 0.0;
-        final ratingsCount = (userData['ratingsCount'] as num?)?.toInt() ?? 0;
-        final completedSwaps = (userData['completedSwaps'] as num?)?.toInt() ?? 0;
-
-        final newRating =
-            ((currentRating * ratingsCount) + rating) / (ratingsCount + 1);
-
-        tx.update(userRef, {
-          'rating': newRating,
-          'ratingsCount': ratingsCount + 1,
-          'completedSwaps': completedSwaps + 1,
-        });
-      });
-      
-      AnalyticsProvider.log('user_rated', _currentUser!.id, {
-        'ratedUserId': userId,
-        'rating': rating,
-      });
-      return true;
-    } catch (e) {
-      _error = 'Failed to rate user: $e';
       print(_error);
       return false;
     }

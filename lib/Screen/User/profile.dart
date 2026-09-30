@@ -12,9 +12,11 @@ import 'package:swapnio/providers/user_data_provider.dart';
 import 'package:swapnio/providers/app_state.dart';
 import '../Admin/Admin.dart';
 import 'complaint_page.dart';
+import 'skill_passport_page.dart';
 import '../../features/gamification/gamification_model.dart';
 import '../../features/gamification/gamification_provider.dart';
 import '../../services/skill_catalog_service.dart';
+import '../../ui/skill_request.dart';
 import '../../services/swap_service.dart';
 import '../../ui/feedback_sheet.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -24,6 +26,11 @@ import '../../ui/swapnio_badges.dart';
 import '../../ui/swapnio_kit.dart';
 import '../../ui/swapnio_widgets.dart';
 import '../../ui/skill_suggestion_chips.dart';
+import 'profile_share_sheet.dart';
+import 'invite_friends_page.dart';
+import 'swap_web_tab.dart';
+import 'calendar_settings_page.dart';
+import 'security_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -32,7 +39,8 @@ class ProfilePage extends StatefulWidget {
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStateMixin {
+class _ProfilePageState extends State<ProfilePage>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   bool _isSettingsSheetOpen = false;
 
@@ -71,8 +79,13 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Row(
                   children: [
-                    Text('Settings',
-                        style: AppTheme.display(fontSize: 26, color: sheetContext.sw.text)),
+                    Text(
+                      'Settings',
+                      style: AppTheme.display(
+                        fontSize: 26,
+                        color: sheetContext.sw.text,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -88,9 +101,12 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final userProvider = Provider.of<UserDataProvider>(context, listen: false);
+      final userProvider = Provider.of<UserDataProvider>(
+        context,
+        listen: false,
+      );
       userProvider.refreshUserData();
       Timer.periodic(const Duration(minutes: 1), (timer) {
         if (mounted) {
@@ -151,91 +167,129 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           body: user == null
               ? const Center(child: Text("No user logged in"))
               : isLoading
-                  ? const SafeArea(child: ProfileSkeleton())
-                  : userData == null
-                      ? const Center(child: Text("Failed to load profile"))
-                      : SafeArea(
-                          bottom: false,
-                          child: NestedScrollView(
-                          // The profile header (gradient banner + stat cards)
-                          // collapses out of the way on scroll-down and snaps
-                          // back on scroll-up, instead of permanently taking
-                          // up screen space above every tab. The status-bar
-                          // inset is handled by the SafeArea above, NOT inside
-                          // the header itself - doing it in both places made
-                          // the fixed-height sliver box too small for its own
-                          // content and it visually spilled into the tab bar.
-                          headerSliverBuilder: (context, innerBoxIsScrolled) => [
-                            SliverAppBar(
-                              pinned: false,
-                              floating: true,
-                              snap: true,
-                              automaticallyImplyLeading: false,
-                              backgroundColor: context.sw.bg,
-                              elevation: 0,
-                              toolbarHeight: 0,
-                              collapsedHeight: 0,
-                              expandedHeight: 372,
-                              flexibleSpace: FlexibleSpaceBar(
-                                background: ClipRect(
-                                  child: _buildProfileHeader(context, user, userData, colorScheme),
-                                ),
-                              ),
+              ? const SafeArea(child: ProfileSkeleton())
+              : userData == null
+              ? const Center(child: Text("Failed to load profile"))
+              : SafeArea(
+                  bottom: false,
+                  child: NestedScrollView(
+                    // The profile header (gradient banner + stat cards)
+                    // collapses out of the way on scroll-down and snaps
+                    // back on scroll-up, instead of permanently taking
+                    // up screen space above every tab. The status-bar
+                    // inset is handled by the SafeArea above, NOT inside
+                    // the header itself - doing it in both places made
+                    // the fixed-height sliver box too small for its own
+                    // content and it visually spilled into the tab bar.
+                    headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                      SliverAppBar(
+                        pinned: false,
+                        floating: true,
+                        snap: true,
+                        automaticallyImplyLeading: false,
+                        backgroundColor: context.sw.bg,
+                        elevation: 0,
+                        toolbarHeight: 0,
+                        collapsedHeight: 0,
+                        expandedHeight: 372,
+                        flexibleSpace: FlexibleSpaceBar(
+                          background: ClipRect(
+                            child: _buildProfileHeader(
+                              context,
+                              user,
+                              userData,
+                              colorScheme,
                             ),
-                          ],
-                          body: Column(
-                            children: [
-                              Container(
-                                margin: const EdgeInsets.symmetric(horizontal: 20),
-                                padding: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  color: context.sw.surfaceLow,
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: TabBar(
-                                  controller: _tabController,
-                                  indicator: BoxDecoration(
-                                    color: context.sw.cta,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  indicatorSize: TabBarIndicatorSize.tab,
-                                  dividerHeight: 0,
-                                  labelColor: context.sw.onCta,
-                                  unselectedLabelColor: context.sw.textMuted,
-                                  labelStyle: GoogleFonts.manrope(
-                                      fontWeight: FontWeight.w800, fontSize: 13.5),
-                                  unselectedLabelStyle: GoogleFonts.manrope(
-                                      fontWeight: FontWeight.w700, fontSize: 13.5),
-                                  splashBorderRadius: BorderRadius.circular(12),
-                                  tabs: const [
-                                    Tab(height: 40, text: 'About'),
-                                    Tab(height: 40, text: 'Skills'),
-                                    Tab(height: 40, text: 'Activity'),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              Expanded(
-                                child: TabBarView(
-                                  controller: _tabController,
-                                  children: [
-                                    _AboutTabView(userData: userData),
-                                    _SkillsTabView(userData: userData),
-                                    _AchievementsTabView(userId: user.uid),
-                                  ],
-                                ),
-                              ),
-                            ],
                           ),
                         ),
-                        ),
+                      ),
+                    ],
+                    // With the keyboard up (e.g. the feedback dialog over this
+                    // page) the body can shrink to a few pixels; skip laying the
+                    // tabs out then instead of overflowing.
+                    body: LayoutBuilder(
+                      builder: (context, constraints) =>
+                          constraints.maxHeight < 120
+                          ? const SizedBox.shrink()
+                          : Column(
+                              children: [
+                                Container(
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: context.sw.surfaceLow,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: TabBar(
+                                    controller: _tabController,
+                                    indicator: BoxDecoration(
+                                      color: context.sw.cta,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    indicatorSize: TabBarIndicatorSize.tab,
+                                    dividerHeight: 0,
+                                    labelColor: context.sw.onCta,
+                                    unselectedLabelColor: context.sw.textMuted,
+                                    labelStyle: GoogleFonts.manrope(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13.5,
+                                    ),
+                                    unselectedLabelStyle: GoogleFonts.manrope(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13.5,
+                                    ),
+                                    splashBorderRadius: BorderRadius.circular(
+                                      12,
+                                    ),
+                                    tabs: const [
+                                      Tab(height: 40, text: 'About'),
+                                      Tab(height: 40, text: 'Skills'),
+                                      Tab(height: 40, text: 'Activity'),
+                                      Tab(height: 40, text: 'Web'),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Expanded(
+                                  child: TabBarView(
+                                    controller: _tabController,
+                                    children: [
+                                      _AboutTabView(userData: userData),
+                                      _SkillsTabView(userData: userData),
+                                      _AchievementsTabView(userId: user.uid),
+                                      SwapWebTab(
+                                        mySkills: {
+                                          ...List<String>.from(
+                                            userData['skillsOffered'] ??
+                                                const [],
+                                          ),
+                                          ...List<String>.from(
+                                            userData['skillsWanted'] ??
+                                                const [],
+                                          ),
+                                        }.toList(),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ),
         );
       },
     );
   }
 
-  Widget _buildProfileHeader(BuildContext context, User user,
-      Map<String, dynamic> userData, ColorScheme colorScheme) {
+  Widget _buildProfileHeader(
+    BuildContext context,
+    User user,
+    Map<String, dynamic> userData,
+    ColorScheme colorScheme,
+  ) {
     final c = context.sw;
     final name = (userData['name'] ?? '').toString().trim();
     final offered = List<String>.from(userData['skillsOffered'] ?? []);
@@ -253,15 +307,44 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
             children: [
               const Spacer(),
               Tooltip(
+                message: 'Share profile',
+                child: Pressable(
+                  onTap: () =>
+                      showProfileShareSheet(context, userData: userData),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: c.surface,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.qr_code_2_rounded,
+                      size: 20,
+                      color: c.text,
+                      semanticLabel: 'Share profile',
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Tooltip(
                 message: 'Settings',
                 child: Pressable(
                   onTap: () => _toggleSettingsSheet(userData),
                   child: Container(
                     width: 40,
                     height: 40,
-                    decoration: BoxDecoration(color: c.surface, shape: BoxShape.circle),
-                    child: Icon(Icons.settings_outlined,
-                        size: 20, color: c.text, semanticLabel: 'Settings'),
+                    decoration: BoxDecoration(
+                      color: c.surface,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.settings_outlined,
+                      size: 20,
+                      color: c.text,
+                      semanticLabel: 'Settings',
+                    ),
                   ),
                 ),
               ),
@@ -274,6 +357,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
               photoUrl: userData['photoUrl'] as String?,
               size: 84,
               radius: 28,
+              verified: userData['verified'] == true,
             ),
           ),
           const SizedBox(height: 10),
@@ -316,7 +400,11 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
               const SizedBox(width: 10),
               Expanded(
                 child: _buildStatCard(
-                    label: 'swaps', value: '$swaps', countValue: swaps, color: c.get),
+                  label: 'swaps',
+                  value: '$swaps',
+                  countValue: swaps,
+                  color: c.get,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -359,14 +447,20 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
     final c = context.sw;
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(18)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(18),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           FittedBox(
             fit: BoxFit.scaleDown,
             child: countValue == null
-                ? Text(value, style: AppTheme.display(fontSize: 22, color: color))
+                ? Text(
+                    value,
+                    style: AppTheme.display(fontSize: 22, color: color),
+                  )
                 : CountUpText(
                     value: countValue,
                     decimals: decimals,
@@ -380,7 +474,10 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: GoogleFonts.manrope(
-                fontSize: 10.5, fontWeight: FontWeight.w700, color: c.textMuted),
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              color: c.textMuted,
+            ),
           ),
         ],
       ),
@@ -415,23 +512,31 @@ class _AboutTabViewState extends State<_AboutTabView> {
 
   Future<void> _saveBio() async {
     final userProvider = Provider.of<UserDataProvider>(context, listen: false);
-    
+
     try {
       await userProvider.updateField('bio', _bioController.text);
       setState(() => _isEditing = false);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update bio: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to update bio: $e')));
     }
   }
-  
+
   void _showAvailabilityDialog() {
-    final days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    
+    final days = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+
     List<String> convertToStringList(dynamic data) {
       if (data == null) return [];
-      
+
       if (data is String) {
         return [data];
       } else if (data is List) {
@@ -440,13 +545,15 @@ class _AboutTabViewState extends State<_AboutTabView> {
         return [];
       }
     }
-    
-    final List<String> currentAvailability = convertToStringList(widget.userData['availability']);
-    
+
+    final List<String> currentAvailability = convertToStringList(
+      widget.userData['availability'],
+    );
+
     final Map<String, bool> selections = {
-      for (var day in days) day: currentAvailability.contains(day)
+      for (var day in days) day: currentAvailability.contains(day),
     };
-    
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -481,14 +588,22 @@ class _AboutTabViewState extends State<_AboutTabView> {
                     final List<String> updatedAvailability = days
                         .where((day) => selections[day] == true)
                         .toList();
-                    
+
                     try {
-                      final userProvider = Provider.of<UserDataProvider>(context, listen: false);
-                      await userProvider.updateField('availability', updatedAvailability);
+                      final userProvider = Provider.of<UserDataProvider>(
+                        context,
+                        listen: false,
+                      );
+                      await userProvider.updateField(
+                        'availability',
+                        updatedAvailability,
+                      );
                       Navigator.of(context).pop();
                     } catch (e) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Failed to update availability: $e')),
+                        SnackBar(
+                          content: Text('Failed to update availability: $e'),
+                        ),
                       );
                     }
                   },
@@ -507,7 +622,7 @@ class _AboutTabViewState extends State<_AboutTabView> {
     if (!_isEditing && widget.userData['bio'] != _bioController.text) {
       _bioController.text = widget.userData['bio']?.toString() ?? '';
     }
-    
+
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -519,10 +634,7 @@ class _AboutTabViewState extends State<_AboutTabView> {
               children: [
                 const Text(
                   'About Me',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 IconButton(
                   icon: Icon(_isEditing ? Icons.save : Icons.edit),
@@ -551,10 +663,7 @@ class _AboutTabViewState extends State<_AboutTabView> {
                   )
                 : Text(
                     widget.userData['bio']?.toString() ?? 'No bio available',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      height: 1.5,
-                    ),
+                    style: const TextStyle(fontSize: 16, height: 1.5),
                   ),
             const SizedBox(height: 24),
             Row(
@@ -562,10 +671,7 @@ class _AboutTabViewState extends State<_AboutTabView> {
               children: [
                 const Text(
                   'Availability',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 TextButton.icon(
                   onPressed: () => _showAvailabilityDialog(),
@@ -581,11 +687,11 @@ class _AboutTabViewState extends State<_AboutTabView> {
       ),
     );
   }
-  
+
   Widget _buildAvailabilitySchedule() {
     List<String> convertToStringList(dynamic data) {
       if (data == null) return [];
-      
+
       if (data is String) {
         return [data];
       } else if (data is List) {
@@ -594,13 +700,23 @@ class _AboutTabViewState extends State<_AboutTabView> {
         return [];
       }
     }
-    
-    final List<String> availabilityList = convertToStringList(widget.userData['availability']);
-    
+
+    final List<String> availabilityList = convertToStringList(
+      widget.userData['availability'],
+    );
+
     final now = DateTime.now();
     final currentDay = _getDayName(now.weekday);
-    
-    final days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+    final days = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
 
     return SurfaceCard(
       padding: EdgeInsets.zero,
@@ -610,8 +726,8 @@ class _AboutTabViewState extends State<_AboutTabView> {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
             decoration: BoxDecoration(
-              color: availabilityList.contains(currentDay) 
-                  ? context.sw.get.withValues(alpha: 0.1) 
+              color: availabilityList.contains(currentDay)
+                  ? context.sw.get.withValues(alpha: 0.1)
                   : Colors.grey.withValues(alpha: 0.1),
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(12),
@@ -645,7 +761,11 @@ class _AboutTabViewState extends State<_AboutTabView> {
               ],
             ),
           ),
-          Divider(height: 1, thickness: 1, color: Colors.grey.withValues(alpha: 0.2)),
+          Divider(
+            height: 1,
+            thickness: 1,
+            color: Colors.grey.withValues(alpha: 0.2),
+          ),
           Padding(
             padding: const EdgeInsets.all(12.0),
             child: Column(
@@ -666,8 +786,12 @@ class _AboutTabViewState extends State<_AboutTabView> {
                         day + (isToday ? ' (Today)' : ''),
                         style: TextStyle(
                           fontSize: isToday ? 17 : 16,
-                          fontWeight: isToday || isAvailable ? FontWeight.bold : FontWeight.normal,
-                          color: isToday ? context.sw.text : (isAvailable ? context.sw.text : Colors.grey),
+                          fontWeight: isToday || isAvailable
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          color: isToday
+                              ? context.sw.text
+                              : (isAvailable ? context.sw.text : Colors.grey),
                         ),
                       ),
                     ],
@@ -680,17 +804,25 @@ class _AboutTabViewState extends State<_AboutTabView> {
       ),
     );
   }
-  
+
   String _getDayName(int weekday) {
     switch (weekday) {
-      case 1: return 'Monday';
-      case 2: return 'Tuesday';
-      case 3: return 'Wednesday';
-      case 4: return 'Thursday';
-      case 5: return 'Friday';
-      case 6: return 'Saturday';
-      case 7: return 'Sunday';
-      default: return '';
+      case 1:
+        return 'Monday';
+      case 2:
+        return 'Tuesday';
+      case 3:
+        return 'Wednesday';
+      case 4:
+        return 'Thursday';
+      case 5:
+        return 'Friday';
+      case 6:
+        return 'Saturday';
+      case 7:
+        return 'Sunday';
+      default:
+        return '';
     }
   }
 }
@@ -723,17 +855,29 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
     super.dispose();
   }
 
-  Future<void> _addSkill(String rawSkill, bool isOffered,
-      {bool announce = true}) async {
-    final skill = SkillCatalogService.instance.canonicalize(rawSkill);
-    if (skill.isEmpty) return;
+  Future<void> _addSkill(
+    String rawSkill,
+    bool isOffered, {
+    bool announce = true,
+  }) async {
+    // Only catalog skills can be added; anything else becomes a request.
+    final skill = await resolveOrRequestSkill(
+      context,
+      rawSkill,
+      offered: isOffered,
+    );
+    if (skill == null) {
+      _newSkillController.clear();
+      return;
+    }
+    if (!mounted) return;
 
     final userProvider = Provider.of<UserDataProvider>(context, listen: false);
-    
+
     try {
       List<String> convertToStringList(dynamic data) {
         if (data == null) return [];
-        
+
         if (data is String) {
           return [data];
         } else if (data is List) {
@@ -742,11 +886,11 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
           return [];
         }
       }
-      
-      List<String> currentSkills = isOffered 
-        ? convertToStringList(widget.userData['skillsOffered'])
-        : convertToStringList(widget.userData['skillsWanted']);
-      
+
+      List<String> currentSkills = isOffered
+          ? convertToStringList(widget.userData['skillsOffered'])
+          : convertToStringList(widget.userData['skillsWanted']);
+
       if (!currentSkills.any((s) => s.toLowerCase() == skill.toLowerCase())) {
         currentSkills.add(skill);
 
@@ -757,15 +901,15 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
         }
         if (announce) _announceSkillReach(skill, isOffered);
       }
-      
+
       _newSkillController.clear();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to add skill: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to add skill: $e')));
     }
   }
-  
+
   /// Effort -> reward: tie adding a skill to its immediate consequence.
   /// Teaching X reaches everyone who wants X; wanting X reaches everyone who
   /// teaches it. A single-field array-contains count needs no extra index.
@@ -773,17 +917,21 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
     try {
       final result = await FirebaseFirestore.instance
           .collection('users')
-          .where(isOffered ? 'skillsWanted' : 'skillsOffered',
-              arrayContains: skill)
+          .where(
+            isOffered ? 'skillsWanted' : 'skillsOffered',
+            arrayContains: skill,
+          )
           .count()
           .get();
       final count = result.count ?? 0;
       if (!mounted || count == 0) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(isOffered
-              ? '$count ${count == 1 ? 'person wants' : 'people want'} to learn $skill'
-              : '$count ${count == 1 ? 'person teaches' : 'people teach'} $skill - check Discover'),
+          content: Text(
+            isOffered
+                ? '$count ${count == 1 ? 'person wants' : 'people want'} to learn $skill'
+                : '$count ${count == 1 ? 'person teaches' : 'people teach'} $skill - check Discover',
+          ),
           backgroundColor: context.sw.give,
         ),
       );
@@ -794,11 +942,11 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
 
   Future<void> _removeSkill(String skill, bool isOffered) async {
     final userProvider = Provider.of<UserDataProvider>(context, listen: false);
-    
+
     try {
       List<String> convertToStringList(dynamic data) {
         if (data == null) return [];
-        
+
         if (data is String) {
           return [data];
         } else if (data is List) {
@@ -807,11 +955,11 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
           return [];
         }
       }
-      
-      List<String> currentSkills = isOffered 
-        ? convertToStringList(widget.userData['skillsOffered'])
-        : convertToStringList(widget.userData['skillsWanted']);
-      
+
+      List<String> currentSkills = isOffered
+          ? convertToStringList(widget.userData['skillsOffered'])
+          : convertToStringList(widget.userData['skillsWanted']);
+
       currentSkills.remove(skill);
 
       if (isOffered) {
@@ -834,9 +982,9 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
           ),
         );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to remove skill: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to remove skill: $e')));
     }
   }
 
@@ -850,10 +998,7 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
           children: [
             const Text(
               'Skills I Offer',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             _buildSkillPills(
@@ -862,7 +1007,7 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
               true,
             ),
             const SizedBox(height: 16),
-            
+
             Row(
               children: [
                 Expanded(
@@ -873,14 +1018,19 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 ElevatedButton(
                   onPressed: () {
-                    _addSkill(_newSkillController.text.trim(), _addingOfferedSkill);
+                    _addSkill(
+                      _newSkillController.text.trim(),
+                      _addingOfferedSkill,
+                    );
                     _newSkillController.clear();
                   },
                   style: ElevatedButton.styleFrom(
@@ -888,12 +1038,22 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: Text(_addingOfferedSkill ? 'Add to Offered' : 'Add to Wanted'),
+                  child: Text(
+                    _addingOfferedSkill ? 'Add to Offered' : 'Add to Wanted',
+                  ),
                 ),
               ],
             ),
             SkillSuggestionChips(
               query: _newSkillController.text,
+              exclude: [
+                ...List<String>.from(
+                  widget.userData['skillsOffered'] ?? const [],
+                ),
+                ...List<String>.from(
+                  widget.userData['skillsWanted'] ?? const [],
+                ),
+              ],
               onSelected: (s) {
                 _addSkill(s, _addingOfferedSkill);
                 _newSkillController.clear();
@@ -907,20 +1067,21 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
                     _addingOfferedSkill = !_addingOfferedSkill;
                   });
                 },
-                icon: Icon(_addingOfferedSkill 
-                  ? Icons.swap_vertical_circle 
-                  : Icons.swap_vertical_circle_outlined),
-                label: Text('Switch to ${_addingOfferedSkill ? 'Wanted' : 'Offered'} Skills'),
+                icon: Icon(
+                  _addingOfferedSkill
+                      ? Icons.swap_vertical_circle
+                      : Icons.swap_vertical_circle_outlined,
+                ),
+                label: Text(
+                  'Switch to ${_addingOfferedSkill ? 'Wanted' : 'Offered'} Skills',
+                ),
               ),
             ),
-            
+
             const SizedBox(height: 24),
             const Text(
               'Skills I\'m Looking For',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             _buildSkillPills(
@@ -937,7 +1098,7 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
   Widget _buildSkillPills(dynamic skills, Color color, bool isOffered) {
     List<String> convertToStringList(dynamic data) {
       if (data == null) return [];
-      
+
       if (data is String) {
         return [data];
       } else if (data is List) {
@@ -946,26 +1107,30 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
         return [];
       }
     }
-    
+
     final List<String> skillsList = convertToStringList(skills);
-    
+
     if (skillsList.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(8.0),
         child: Text('No skills listed yet'),
       );
     }
-    
+
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: skillsList.map((skill) => Chip(
-        label: Text(skill),
-        backgroundColor: color.withValues(alpha: 0.2),
-        labelStyle: TextStyle(color: color.withValues(alpha: 0.8)),
-        deleteIcon: const Icon(Icons.cancel, size: 18),
-        onDeleted: () => _removeSkill(skill, isOffered),
-      )).toList(),
+      children: skillsList
+          .map(
+            (skill) => Chip(
+              label: Text(skill),
+              backgroundColor: color.withValues(alpha: 0.2),
+              labelStyle: TextStyle(color: color.withValues(alpha: 0.8)),
+              deleteIcon: const Icon(Icons.cancel, size: 18),
+              onDeleted: () => _removeSkill(skill, isOffered),
+            ),
+          )
+          .toList(),
     );
   }
 }
@@ -977,7 +1142,8 @@ class _SettingsTabView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isAdmin = Provider.of<AppState>(context).currentUser?.isAdmin ?? false;
+    final isAdmin =
+        Provider.of<AppState>(context).currentUser?.isAdmin ?? false;
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -996,7 +1162,8 @@ class _SettingsTabView extends StatelessWidget {
               icon: Icons.notifications,
               title: 'Notification Settings',
               subtitle: 'Manage your notification preferences',
-              onTap: () => _closeThenPush(context, const NotificationSettingsPage()),
+              onTap: () =>
+                  _closeThenPush(context, const NotificationSettingsPage()),
             ),
             _buildSettingsButton(
               context,
@@ -1016,6 +1183,38 @@ class _SettingsTabView extends StatelessWidget {
             const SizedBox(height: 8),
             _buildSettingsButton(
               context,
+              icon: Icons.badge_outlined,
+              title: 'Skill Passport',
+              subtitle: 'Your verified teaching record, ready to share',
+              onTap: () => _closeThenPush(context, const SkillPassportPage()),
+            ),
+            _buildSettingsButton(
+              context,
+              icon: Icons.shield_outlined,
+              title: 'Security',
+              subtitle: 'Devices, activity and two-factor',
+              onTap: () => _closeThenPush(context, const SecurityPage()),
+            ),
+            _buildSettingsButton(
+              context,
+              icon: Icons.calendar_month_rounded,
+              title: 'Google Calendar',
+              subtitle: 'Meet links, invites and busy times',
+              onTap: () =>
+                  _closeThenPush(context, const CalendarSettingsPage()),
+            ),
+            _buildSettingsButton(
+              context,
+              icon: Icons.card_giftcard_rounded,
+              title: 'Invite friends',
+              subtitle: 'Share your QR, earn referral badges',
+              onTap: () => _closeThenPush(
+                context,
+                InviteFriendsPage(userData: userData),
+              ),
+            ),
+            _buildSettingsButton(
+              context,
               icon: Icons.insights,
               title: 'Progress Dashboard',
               subtitle: 'Track sessions, quizzes and peer ratings',
@@ -1031,8 +1230,8 @@ class _SettingsTabView extends StatelessWidget {
             _buildSettingsButton(
               context,
               icon: Icons.verified_user,
-              title: 'Profile Verification',
-              subtitle: 'Verify your email and phone',
+              title: 'Get verified',
+              subtitle: 'Email + phone for the verified ring and perks',
               onTap: () => _closeThenNamed(context, '/verification'),
             ),
             const SizedBox(height: 24),
@@ -1072,7 +1271,7 @@ class _SettingsTabView extends StatelessWidget {
                 subtitle: 'Browse app activity events (admin only)',
                 onTap: () => _closeThenNamed(context, '/analytics'),
               ),
-              ],
+            ],
             if (isAdmin)
               _buildSettingsButton(
                 context,
@@ -1110,7 +1309,7 @@ class _SettingsTabView extends StatelessWidget {
       ),
     );
   }
-  
+
   /// Settings actions always dismiss the sheet before they navigate, so it
   /// can't linger over the destination.
   void _closeThenPush(BuildContext context, Widget page) {
@@ -1165,13 +1364,17 @@ class _SettingsTabView extends StatelessWidget {
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
     try {
-      await FirebaseFunctions.instance.httpsCallable('selfDeleteAccount').call();
+      await FirebaseFunctions.instance
+          .httpsCallable('selfDeleteAccount')
+          .call();
       navigator.pop();
       await FirebaseAuth.instance.signOut();
     } on FirebaseFunctionsException catch (e) {
       navigator.pop();
       messenger.showSnackBar(
-        SnackBar(content: Text('Could not delete account: ${e.message ?? e.code}')),
+        SnackBar(
+          content: Text('Could not delete account: ${e.message ?? e.code}'),
+        ),
       );
     } catch (e) {
       navigator.pop();
@@ -1231,7 +1434,10 @@ class _SettingsTabView extends StatelessWidget {
                       subtitle,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted),
+                      style: GoogleFonts.manrope(
+                        fontSize: 12,
+                        color: c.textMuted,
+                      ),
                     ),
                   ],
                 ),
@@ -1372,8 +1578,11 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(blocked ? Icons.block : Icons.warning_amber_rounded,
-                  color: color, size: 20),
+              Icon(
+                blocked ? Icons.block : Icons.warning_amber_rounded,
+                color: color,
+                size: 20,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -1383,17 +1592,22 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
                       blocked
                           ? 'Session booking paused'
                           : 'Your attendance is slipping',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: color),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       blocked
                           ? 'You showed up to ${status.attended} of ${status.total} sessions. '
-                              'Attend the ones you\'ve agreed to and booking unlocks automatically.'
+                                'Attend the ones you\'ve agreed to and booking unlocks automatically.'
                           : '${status.showUpRate}% show-up rate. Missing more sessions will pause your booking.',
                       style: TextStyle(
                         fontSize: 13,
-                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurface.withValues(alpha: 0.8),
                       ),
                     ),
                   ],
@@ -1406,26 +1620,40 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
     );
   }
 
-  Widget _buildGamificationSection(BuildContext context, Gamification gamification) {
+  Widget _buildGamificationSection(
+    BuildContext context,
+    Gamification gamification,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
             Expanded(
-              child: _statCard(context,
-                  icon: Icons.stars, label: 'Points', value: '${gamification.points}'),
+              child: _statCard(
+                context,
+                icon: Icons.stars,
+                label: 'Points',
+                value: '${gamification.points}',
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: _statCard(context,
-                  icon: Icons.military_tech, label: 'Level', value: '${gamification.level}'),
+              child: _statCard(
+                context,
+                icon: Icons.military_tech,
+                label: 'Level',
+                value: '${gamification.level}',
+              ),
             ),
           ],
         ),
         const SizedBox(height: 16),
         const KitSection('Badges'),
-        BadgeCollection(earnedIds: gamification.badges),
+        BadgeCollection(
+          earnedIds: gamification.badges,
+          stats: gamification.stats,
+        ),
       ],
     );
   }
@@ -1458,11 +1686,19 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: Text(value, style: AppTheme.display(fontSize: 22, color: c.text)),
+                  child: Text(
+                    value,
+                    style: AppTheme.display(fontSize: 22, color: c.text),
+                  ),
                 ),
-                Text(label,
-                    style: GoogleFonts.manrope(
-                        fontSize: 11.5, fontWeight: FontWeight.w700, color: c.textMuted)),
+                Text(
+                  label,
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: c.textMuted,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1488,15 +1724,21 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
         return Column(
           children: docs.map((doc) {
             final data = doc.data() as Map<String, dynamic>;
-            final names = Map<String, dynamic>.from(data['participantNames'] ?? {});
-            final otherId = List<String>.from(data['participants'] ?? [])
-                .firstWhere((p) => p != userId, orElse: () => '');
+            final names = Map<String, dynamic>.from(
+              data['participantNames'] ?? {},
+            );
+            final otherId = List<String>.from(
+              data['participants'] ?? [],
+            ).firstWhere((p) => p != userId, orElse: () => '');
             final otherName = (names[otherId] as String?) ?? 'Swap partner';
             final status = (data['status'] as String?) ?? 'pending';
             final skillOffered = data['skillOffered'] ?? '';
             return ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(_iconForSessionStatus(status), color: context.sw.give),
+              leading: Icon(
+                _iconForSessionStatus(status),
+                color: context.sw.give,
+              ),
               title: Text('$otherName - $skillOffered'),
               subtitle: Text(_labelForSessionStatus(status)),
               dense: true,
@@ -1514,6 +1756,7 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
       case 'accepted':
         return Icons.event_available;
       case 'declined':
+      case 'cancelled':
         return Icons.cancel;
       case 'no_show':
         return Icons.event_busy;
@@ -1530,6 +1773,8 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
         return 'Accepted - upcoming';
       case 'declined':
         return 'Declined';
+      case 'cancelled':
+        return 'Cancelled';
       case 'no_show':
         return 'No-show';
       default:
@@ -1561,9 +1806,13 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.star, color: context.sw.give),
               title: Text('${rating.toStringAsFixed(1)} stars'),
-              subtitle: Text(review.isEmpty
-                  ? (timestamp != null ? DateFormat.yMMMd().format(timestamp.toDate()) : '')
-                  : review),
+              subtitle: Text(
+                review.isEmpty
+                    ? (timestamp != null
+                          ? DateFormat.yMMMd().format(timestamp.toDate())
+                          : '')
+                    : review,
+              ),
               dense: true,
             );
           }).toList(),
@@ -1608,7 +1857,9 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
                       radius: 16,
                       backgroundColor: i < 3
                           ? context.sw.give.withValues(alpha: 0.15)
-                          : Theme.of(context).colorScheme.surfaceContainerHighest,
+                          : Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
                       child: Text(
                         '#${i + 1}',
                         style: TextStyle(
@@ -1621,9 +1872,13 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
                       ),
                     ),
                     title: Text(
-                      docs[i].id == userId ? 'You' : (names[docs[i].id] ?? 'Swapnio user'),
+                      docs[i].id == userId
+                          ? 'You'
+                          : (names[docs[i].id] ?? 'Swapnio user'),
                       style: TextStyle(
-                        fontWeight: docs[i].id == userId ? FontWeight.bold : null,
+                        fontWeight: docs[i].id == userId
+                            ? FontWeight.bold
+                            : null,
                       ),
                     ),
                     trailing: Text(

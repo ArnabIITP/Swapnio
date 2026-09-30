@@ -34,7 +34,7 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
 
   Future<void> _loadPrivacySettings() async {
     setState(() => _isLoading = true);
-    
+
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception("No logged in user");
@@ -43,8 +43,9 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
       // sub-collection) so that other users - who can read `users/{uid}` but
       // not a private sub-collection - can actually see and honor these
       // preferences when viewing this user's profile.
-      final docRef =
-          FirebaseFirestore.instance.collection('users').doc(user.uid);
+      final docRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid);
 
       final doc = await docRef.get();
       final privacy = doc.data()?['privacy'] as Map<String, dynamic>?;
@@ -63,7 +64,7 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading privacy settings: $e'))
+        SnackBar(content: Text('Error loading privacy settings: $e')),
       );
     } finally {
       if (mounted) {
@@ -74,22 +75,21 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
 
   Future<void> _savePrivacySettings() async {
     setState(() => _isLoading = true);
-    
+
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception("No logged in user");
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set({'privacy': _privacySettings}, SetOptions(merge: true));
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Privacy settings saved'))
-      );
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'privacy': _privacySettings,
+      }, SetOptions(merge: true));
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Privacy settings saved')));
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving privacy settings: $e'))
+        SnackBar(content: Text('Error saving privacy settings: $e')),
       );
     } finally {
       if (mounted) {
@@ -107,118 +107,132 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SwapHeader(title: 'Privacy', subtitle: 'Control what other people can see'),
-            Expanded(child: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                const SizedBox(height: 8),
-                _buildInfoCard(),
-                const SizedBox(height: 28),
-                _buildProfileVisibilitySelector(),
-                const SizedBox(height: 18),
-                _buildSettingSwitch(
-                  title: 'Show Email',
-                  subtitle: 'Allow other users to see your email address',
-                  value: _privacySettings['showEmail'],
-                  onChanged: (value) {
-                    setState(() {
-                      _privacySettings['showEmail'] = value;
-                    });
-                  },
-                ),
-                _buildSettingSwitch(
-                  title: 'Share Skills',
-                  subtitle: 'Make your skills visible to other users',
-                  value: _privacySettings['shareSkills'],
-                  onChanged: (value) {
-                    setState(() {
-                      _privacySettings['shareSkills'] = value;
-                    });
-                  },
-                ),
-                _buildSettingSwitch(
-                  title: 'Share Availability',
-                  subtitle: 'Allow others to see when you are available',
-                  value: _privacySettings['shareAvailability'],
-                  onChanged: (value) {
-                    setState(() {
-                      _privacySettings['shareAvailability'] = value;
-                    });
-                  },
-                ),
-                _buildSettingSwitch(
-                  title: 'Hide Location',
-                  subtitle: 'Don\'t show your approximate location to others',
-                  value: _privacySettings['hideLocation'],
-                  onChanged: (value) {
-                    setState(() {
-                      _privacySettings['hideLocation'] = value;
-                    });
-                  },
-                ),
-                _buildSettingSwitch(
-                  title: 'Allow Data Collection',
-                  subtitle: 'Help us improve by sharing anonymous usage data',
-                  value: _privacySettings['allowDataCollection'],
-                  onChanged: (value) {
-                    setState(() {
-                      _privacySettings['allowDataCollection'] = value;
-                    });
-                  },
-                ),
-                const SizedBox(height: 28),
-                _buildAppearanceSection(),
-                const SizedBox(height: 28),
-                PillButton(label: 'Save Changes', onTap: _savePrivacySettings),
-                const SizedBox(height: 8),
-                Center(
-                  child: Text(
-                    'Looking to delete your account? That\'s in Profile > Settings.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: context.sw.textMuted, fontSize: 13),
-                  ),
-                ),
-              ],
+            SwapHeader(
+              title: 'Privacy',
+              subtitle: 'Control what other people can see',
             ),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : ListView(
+                      padding: const EdgeInsets.all(20),
+                      children: [
+                        const SizedBox(height: 8),
+                        _buildInfoCard(),
+                        const SizedBox(height: 28),
+                        _buildProfileVisibilitySelector(),
+                        const SizedBox(height: 18),
+                        _buildSettingSwitch(
+                          title: 'Show Email',
+                          subtitle:
+                              'Allow other users to see your email address',
+                          value: _privacySettings['showEmail'],
+                          onChanged: (value) {
+                            setState(() {
+                              _privacySettings['showEmail'] = value;
+                            });
+                          },
+                        ),
+                        _buildSettingSwitch(
+                          title: 'Share Skills',
+                          subtitle: 'Make your skills visible to other users',
+                          value: _privacySettings['shareSkills'],
+                          onChanged: (value) {
+                            setState(() {
+                              _privacySettings['shareSkills'] = value;
+                            });
+                          },
+                        ),
+                        _buildSettingSwitch(
+                          title: 'Share Availability',
+                          subtitle:
+                              'Allow others to see when you are available',
+                          value: _privacySettings['shareAvailability'],
+                          onChanged: (value) {
+                            setState(() {
+                              _privacySettings['shareAvailability'] = value;
+                            });
+                          },
+                        ),
+                        _buildSettingSwitch(
+                          title: 'Hide Location',
+                          subtitle:
+                              'Don\'t show your approximate location to others',
+                          value: _privacySettings['hideLocation'],
+                          onChanged: (value) {
+                            setState(() {
+                              _privacySettings['hideLocation'] = value;
+                            });
+                          },
+                        ),
+                        _buildSettingSwitch(
+                          title: 'Allow Data Collection',
+                          subtitle:
+                              'Help us improve by sharing anonymous usage data',
+                          value: _privacySettings['allowDataCollection'],
+                          onChanged: (value) {
+                            setState(() {
+                              _privacySettings['allowDataCollection'] = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 28),
+                        _buildAppearanceSection(),
+                        const SizedBox(height: 28),
+                        PillButton(
+                          label: 'Save Changes',
+                          onTap: _savePrivacySettings,
+                        ),
+                        const SizedBox(height: 8),
+                        Center(
+                          child: Text(
+                            'Looking to delete your account? That\'s in Profile > Settings.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: context.sw.textMuted,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
             ),
           ],
         ),
       ),
     );
   }
-  
+
   Widget _buildInfoCard() {
     return SurfaceCard(
       padding: const EdgeInsets.all(20),
       child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.privacy_tip, color: context.sw.give, size: 28),
-                const SizedBox(width: 10),
-                Text(
-                  'Privacy Preferences',
-                  style: TextStyle(
-                    fontSize: 19,
-                    fontWeight: FontWeight.bold,
-                    color: context.sw.text,
-                  ),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.privacy_tip, color: context.sw.give, size: 28),
+              const SizedBox(width: 10),
+              Text(
+                'Privacy Preferences',
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                  color: context.sw.text,
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Control what information you share with other users and how your data is used in Swapnio.',
-              style: TextStyle(fontSize: 15, color: context.sw.textMuted),
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Control what information you share with other users and how your data is used in Swapnio.',
+            style: TextStyle(fontSize: 15, color: context.sw.textMuted),
+          ),
+        ],
+      ),
     );
   }
-  
+
   Widget _buildProfileVisibilitySelector() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -234,10 +248,7 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
         const SizedBox(height: 4),
         Text(
           'Choose who can view your profile',
-          style: TextStyle(
-            fontSize: 14,
-            color: Color(0xFF888888),
-          ),
+          style: TextStyle(fontSize: 14, color: Color(0xFF888888)),
         ),
         const SizedBox(height: 10),
         Container(
@@ -265,7 +276,9 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
                 ),
                 DropdownMenuItem(
                   value: 'matches',
-                  child: const Text('Matches Only - Only users you\'ve matched with'),
+                  child: const Text(
+                    'Matches Only - Only users you\'ve matched with',
+                  ),
                 ),
                 DropdownMenuItem(
                   value: 'private',
@@ -285,7 +298,7 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
       ],
     );
   }
-  
+
   Widget _buildSettingSwitch({
     required String title,
     required String subtitle,
@@ -316,7 +329,10 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
                   const SizedBox(height: 3),
                   Text(
                     subtitle,
-                    style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted),
+                    style: GoogleFonts.manrope(
+                      fontSize: 12,
+                      color: c.textMuted,
+                    ),
                   ),
                 ],
               ),
@@ -342,37 +358,37 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
     return SurfaceCard(
       padding: const EdgeInsets.all(20),
       child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.brightness_6, color: context.sw.give, size: 28),
-                SizedBox(width: 10),
-                Text(
-                  'Appearance',
-                  style: TextStyle(
-                    fontSize: 19,
-                    fontWeight: FontWeight.bold,
-                    color: context.sw.text,
-                  ),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.brightness_6, color: context.sw.give, size: 28),
+              SizedBox(width: 10),
+              Text(
+                'Appearance',
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                  color: context.sw.text,
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Choose between the light and dark Sahara themes.',
-              style: TextStyle(fontSize: 15, color: context.sw.textMuted),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 10,
-              children: [
-                _buildThemeChip('Light', appState.themeMode),
-                _buildThemeChip('Dark', appState.themeMode),
-              ],
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Choose between the light and dark Sahara themes.',
+            style: TextStyle(fontSize: 15, color: context.sw.textMuted),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            children: [
+              _buildThemeChip('Light', appState.themeMode),
+              _buildThemeChip('Dark', appState.themeMode),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -381,7 +397,8 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
     final themeMode = label == 'Dark' ? ThemeMode.dark : ThemeMode.light;
     final selected = current == themeMode;
     return Pressable(
-      onTap: () => Provider.of<AppState>(context, listen: false).setThemeMode(themeMode),
+      onTap: () =>
+          Provider.of<AppState>(context, listen: false).setThemeMode(themeMode),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         decoration: BoxDecoration(
@@ -393,7 +410,9 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              label == 'Dark' ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+              label == 'Dark'
+                  ? Icons.dark_mode_rounded
+                  : Icons.light_mode_rounded,
               size: 16,
               color: selected ? c.onCta : c.textMuted,
             ),
@@ -411,5 +430,4 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
       ),
     );
   }
-
 }

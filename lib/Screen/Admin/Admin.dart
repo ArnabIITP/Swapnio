@@ -8,7 +8,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../ui/swapnio_kit.dart';
 import '../../ui/swapnio_widgets.dart';
 import '../../services/feedback_service.dart';
+import '../../services/skill_catalog_service.dart';
 import 'complaints_page.dart';
+import 'admin_member_security_page.dart';
 
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
@@ -17,13 +19,16 @@ class AdminPage extends StatefulWidget {
   State<AdminPage> createState() => _AdminPageState();
 }
 
-class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMixin {
+class _AdminPageState extends State<AdminPage>
+    with SingleTickerProviderStateMixin {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   late TabController _tabController;
   bool _isLoading = true;
   Map<String, dynamic> _stats = {};
   List<DocumentSnapshot> _allUsers = [];
   List<Map<String, dynamic>> _adminSkills = [];
+  // The catalog has 150+ skills; show a first screenful until asked.
+  bool _showAllCuratedSkills = false;
   List<Map<String, dynamic>> _reports = [];
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -43,10 +48,12 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
     _fetchAdminStats();
     _loadSkills();
     _loadReports();
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-    ));
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+      ),
+    );
   }
 
   @override
@@ -59,18 +66,24 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
 
   void _setupRealtimeUpdates() {
     _usersSubscription?.cancel();
-    _usersSubscription = _firestore.collection('users').snapshots().listen((snapshot) {
-      setState(() {
-        _allUsers = snapshot.docs;
-        _isLoading = false;
-      });
-      _fetchAdminStats();
-    }, onError: (e) {
-      setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error in real-time updates: $e")),
-      );
-    });
+    _usersSubscription = _firestore
+        .collection('users')
+        .snapshots()
+        .listen(
+          (snapshot) {
+            setState(() {
+              _allUsers = snapshot.docs;
+              _isLoading = false;
+            });
+            _fetchAdminStats();
+          },
+          onError: (e) {
+            setState(() => _isLoading = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("Error in real-time updates: $e")),
+            );
+          },
+        );
   }
 
   Future<void> _fetchAllUsers() async {
@@ -115,14 +128,18 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _deletingUid = uid);
     try {
-      final callable = FirebaseFunctions.instance.httpsCallable('adminDeleteUser');
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'adminDeleteUser',
+      );
       final result = await callable.call<Map<String, dynamic>>({'uid': uid});
       final authDeleted = result.data['authDeleted'] == true;
       messenger.showSnackBar(
         SnackBar(
-          content: Text(authDeleted
-              ? 'User and all their data deleted.'
-              : 'Data deleted. No login existed for this account.'),
+          content: Text(
+            authDeleted
+                ? 'User and all their data deleted.'
+                : 'Data deleted. No login existed for this account.',
+          ),
         ),
       );
       _fetchAllUsers();
@@ -182,9 +199,12 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
       final data = doc.data() as Map<String, dynamic>;
       final name = (data['name'] ?? '').toString().toLowerCase();
       final email = (data['email'] ?? '').toString().toLowerCase();
-      final skills = (data['skillsOffered'] as List?)?.join(" ").toLowerCase() ?? '';
+      final skills =
+          (data['skillsOffered'] as List?)?.join(" ").toLowerCase() ?? '';
       final query = _searchQuery.toLowerCase();
-      return name.contains(query) || email.contains(query) || skills.contains(query);
+      return name.contains(query) ||
+          email.contains(query) ||
+          skills.contains(query);
     }).toList();
   }
 
@@ -206,10 +226,16 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
               child: Pressable(
                 onTap: () => Navigator.of(context).maybePop(),
                 child: Container(
-                  decoration:
-                      BoxDecoration(color: context.sw.surface, shape: BoxShape.circle),
-                  child: Icon(Icons.arrow_back_rounded,
-                      size: 20, color: context.sw.text, semanticLabel: 'Back'),
+                  decoration: BoxDecoration(
+                    color: context.sw.surface,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.arrow_back_rounded,
+                    size: 20,
+                    color: context.sw.text,
+                    semanticLabel: 'Back',
+                  ),
                 ),
               ),
             ),
@@ -222,11 +248,21 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                     mainAxisAlignment: MainAxisAlignment.end,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('ADMIN',
-                          style: AppTheme.label(fontSize: 10, color: context.sw.give)),
+                      Text(
+                        'ADMIN',
+                        style: AppTheme.label(
+                          fontSize: 10,
+                          color: context.sw.give,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      Text('Dashboard',
-                          style: AppTheme.display(fontSize: 32, color: context.sw.text)),
+                      Text(
+                        'Dashboard',
+                        style: AppTheme.display(
+                          fontSize: 32,
+                          color: context.sw.text,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -242,10 +278,16 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                   child: Container(
                     width: 40,
                     height: 40,
-                    decoration:
-                        BoxDecoration(color: context.sw.surface, shape: BoxShape.circle),
-                    child: Icon(Icons.report_gmailerrorred_outlined,
-                        size: 20, color: context.sw.text, semanticLabel: 'Complaints'),
+                    decoration: BoxDecoration(
+                      color: context.sw.surface,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.report_gmailerrorred_outlined,
+                      size: 20,
+                      color: context.sw.text,
+                      semanticLabel: 'Complaints',
+                    ),
                   ),
                 ),
               ),
@@ -259,10 +301,16 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                   child: Container(
                     width: 40,
                     height: 40,
-                    decoration:
-                        BoxDecoration(color: context.sw.surface, shape: BoxShape.circle),
-                    child: Icon(Icons.refresh_rounded,
-                        size: 20, color: context.sw.text, semanticLabel: 'Refresh'),
+                    decoration: BoxDecoration(
+                      color: context.sw.surface,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.refresh_rounded,
+                      size: 20,
+                      color: context.sw.text,
+                      semanticLabel: 'Refresh',
+                    ),
                   ),
                 ),
               ),
@@ -294,7 +342,10 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                   ),
                   filled: true,
                   fillColor: context.sw.surface,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
+                  contentPadding: const EdgeInsets.symmetric(
+                    vertical: 0,
+                    horizontal: 12,
+                  ),
                 ),
                 onChanged: (value) {
                   setState(() => _searchQuery = value);
@@ -322,10 +373,14 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 dividerHeight: 0,
                 labelColor: context.sw.onCta,
                 unselectedLabelColor: context.sw.textMuted,
-                labelStyle:
-                    GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 13.5),
-                unselectedLabelStyle:
-                    GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13.5),
+                labelStyle: GoogleFonts.manrope(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13.5,
+                ),
+                unselectedLabelStyle: GoogleFonts.manrope(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13.5,
+                ),
                 splashBorderRadius: BorderRadius.circular(12),
                 tabs: const [
                   Tab(height: 40, text: 'Users'),
@@ -530,7 +585,10 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                           ),
                           if (isAdmin)
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 5,
+                              ),
                               decoration: BoxDecoration(
                                 color: context.sw.get.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(8),
@@ -563,13 +621,31 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.star, color: context.sw.give, size: 17),
+                              Icon(
+                                Icons.star,
+                                color: context.sw.give,
+                                size: 17,
+                              ),
                               const SizedBox(width: 4),
                               Text('${rating.toStringAsFixed(1)} Rating'),
                             ],
                           ),
                           Row(
                             children: [
+                              _buildUserActionButton(
+                                icon: Icons.shield_outlined,
+                                color: context.sw.success,
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => AdminMemberSecurityPage(
+                                      userId: uid,
+                                      name: name,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
                               _buildUserActionButton(
                                 icon: Icons.block,
                                 color: context.sw.get,
@@ -630,138 +706,152 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
     }
     final sortedSkills = skillCounts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    return Column(
-      children: [
-        ..._buildCuratedSkillsSection(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-          child: Row(
-            children: [
-              Text(
-                'Most Popular Skills',
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  color: context.sw.give,
-                ),
+    // One scrolling list: requests, the catalog and the popularity cards
+    // all scroll together, so a long catalog or several pending requests
+    // can't push the tab past the bottom of the screen.
+    final header = <Widget>[
+      const _SkillRequestsSection(),
+      ..._buildCuratedSkillsSection(),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+        child: Row(
+          children: [
+            Text(
+              'Most Popular Skills',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+                color: context.sw.give,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            itemCount: sortedSkills.isEmpty ? 1 : sortedSkills.length,
-            itemBuilder: (context, index) {
-              if (sortedSkills.isEmpty) {
-                return const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Text("No skills found in the system"),
-                  ),
-                );
-              }
-              final skill = sortedSkills[index].key;
-              final count = sortedSkills[index].value;
-              final percentage = _allUsers.isEmpty ? 0.0 : (count / _allUsers.length) * 100;
-              final hue = (skill.hashCode % 360).toDouble();
-              final color = HSLColor.fromAHSL(1.0, hue, 0.6, 0.5).toColor();
-              return SurfaceCard(
-                margin: const EdgeInsets.only(bottom: 13),
-                child: Padding(
-                  padding: const EdgeInsets.all(15),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+      ),
+    ];
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 16),
+      itemCount:
+          header.length + (sortedSkills.isEmpty ? 1 : sortedSkills.length),
+      itemBuilder: (context, i) {
+        if (i < header.length) return header[i];
+        final index = i - header.length;
+        if (sortedSkills.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: Text("No skills found in the system"),
+            ),
+          );
+        }
+        final skill = sortedSkills[index].key;
+        final count = sortedSkills[index].value;
+        final percentage = _allUsers.isEmpty
+            ? 0.0
+            : (count / _allUsers.length) * 100;
+        final hue = (skill.hashCode % 360).toDouble();
+        final color = HSLColor.fromAHSL(1.0, hue, 0.6, 0.5).toColor();
+        return SurfaceCard(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 13),
+          child: Padding(
+            padding: const EdgeInsets.all(15),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.auto_awesome, color: color),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: color.withValues(alpha: 0.2),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(Icons.auto_awesome, color: color),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  skill,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                                Text(
-                                  '$count ${count == 1 ? "user" : "users"} (${percentage.toStringAsFixed(1)}%)',
-                                  style: TextStyle(
-                                    color: context.sw.textMuted,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ],
+                          Text(
+                            skill,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
                             ),
                           ),
-                          IconButton(
-                            icon: Icon(Icons.edit, color: context.sw.give),
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text("Edit skill feature coming soon")),
-                              );
-                            },
+                          Text(
+                            '$count ${count == 1 ? "user" : "users"} (${percentage.toStringAsFixed(1)}%)',
+                            style: TextStyle(
+                              color: context.sw.textMuted,
+                              fontSize: 14,
+                            ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: LinearProgressIndicator(
-                          value: _allUsers.isEmpty
-                              ? 0
-                              : (count / _allUsers.length).clamp(0.0, 1.0),
-                          backgroundColor: context.sw.border,
-                          color: color,
-                          minHeight: 8,
-                        ),
-                      ),
-                    ],
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.edit, color: context.sw.give),
+                      onPressed: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Edit skill feature coming soon"),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: _allUsers.isEmpty
+                        ? 0
+                        : (count / _allUsers.length).clamp(0.0, 1.0),
+                    backgroundColor: context.sw.border,
+                    color: color,
+                    minHeight: 8,
                   ),
                 ),
-              );
-            },
+              ],
+            ),
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 
   Widget _buildReportsTab() {
     if (_reports.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.verified_user_outlined,
-                size: 80, color: context.sw.border),
-            const SizedBox(height: 16),
-            Text(
-              'All clear',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: context.sw.give,
+      // The dashboard header takes most of the screen until it's scrolled
+      // away, so this must be able to scroll rather than overflow.
+      return ListView(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        children: [
+          Column(
+            children: [
+              Icon(
+                Icons.verified_user_outlined,
+                size: 80,
+                color: context.sw.border,
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'No open reports right now.',
-              style: TextStyle(color: context.sw.textMuted),
-            ),
-          ],
-        ),
+              const SizedBox(height: 16),
+              Text(
+                'All clear',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: context.sw.give,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'No open reports right now.',
+                style: TextStyle(color: context.sw.textMuted),
+              ),
+            ],
+          ),
+        ],
       );
     }
 
@@ -784,9 +874,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 onPressed: _loadReports,
                 icon: const Icon(Icons.refresh, size: 18),
                 label: const Text('Refresh'),
-                style: TextButton.styleFrom(
-                  foregroundColor: context.sw.give,
-                ),
+                style: TextButton.styleFrom(foregroundColor: context.sw.give),
               ),
             ],
           ),
@@ -823,8 +911,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                     color: context.sw.get.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(Icons.flag_outlined,
-                      color: context.sw.get),
+                  child: Icon(Icons.flag_outlined, color: context.sw.get),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -841,12 +928,16 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                       Text(
                         'Reported: $reportedId',
                         style: TextStyle(
-                            color: context.sw.textMuted, fontSize: 12),
+                          color: context.sw.textMuted,
+                          fontSize: 12,
+                        ),
                       ),
                       Text(
                         'Reporter: $reporterId',
                         style: TextStyle(
-                            color: context.sw.textMuted, fontSize: 12),
+                          color: context.sw.textMuted,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
@@ -871,8 +962,8 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 ),
                 const SizedBox(width: 10),
                 ElevatedButton.icon(
-                  onPressed: () => _confirmBanUser(
-                      reportedId, report['id'] as String?),
+                  onPressed: () =>
+                      _confirmBanUser(reportedId, report['id'] as String?),
                   icon: const Icon(Icons.block, size: 16),
                   label: const Text('Suspend'),
                   style: ElevatedButton.styleFrom(
@@ -887,6 +978,7 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
       ),
     );
   }
+
   /// Real-time feed of user-submitted feedback, each attributed to the
   /// account that sent it (name + email captured at submission time).
   Widget _buildFeedbackTab() {
@@ -899,7 +991,10 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
         final docs = snapshot.data?.docs ?? const [];
         if (docs.isEmpty) {
           return Center(
-            child: Text('No feedback yet.', style: TextStyle(color: context.sw.textMuted)),
+            child: Text(
+              'No feedback yet.',
+              style: TextStyle(color: context.sw.textMuted),
+            ),
           );
         }
         return ListView.builder(
@@ -926,12 +1021,20 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(userName,
-                                  style: const TextStyle(fontWeight: FontWeight.bold)),
+                              Text(
+                                userName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               if (userEmail.isNotEmpty)
-                                Text(userEmail,
-                                    style: TextStyle(
-                                        fontSize: 12, color: context.sw.textMuted)),
+                                Text(
+                                  userEmail,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: context.sw.textMuted,
+                                  ),
+                                ),
                             ],
                           ),
                         ),
@@ -957,13 +1060,16 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                           createdAt != null
                               ? '${createdAt.toDate()}'.split('.').first
                               : '',
-                          style: TextStyle(fontSize: 11, color: context.sw.textMuted),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: context.sw.textMuted,
+                          ),
                         ),
                         const Spacer(),
                         if (status == 'new')
                           TextButton(
-                            onPressed: () =>
-                                FeedbackService.instance.markReviewed(docs[index].id),
+                            onPressed: () => FeedbackService.instance
+                                .markReviewed(docs[index].id),
                             child: const Text('Mark reviewed'),
                           )
                         else
@@ -980,16 +1086,26 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
     );
   }
 
-          Future<void> _loadSkills() async {
+  Future<void> _loadSkills() async {
     try {
-      final snapshot = await _firestore
-          .collection('skills')
-          .orderBy('createdAt', descending: true)
-          .limit(100)
-          .get();
+      // No orderBy on createdAt: Firestore drops documents missing the
+      // ordered field, and the seeded catalog skills don't have one. Sort
+      // client-side instead - catalog order first, then name.
+      final snapshot = await _firestore.collection('skills').get();
       if (!mounted) return;
+      final docs = snapshot.docs.toList()
+        ..sort((a, b) {
+          final byOrder = ((a.data()['order'] as num?) ?? 1e9).compareTo(
+            (b.data()['order'] as num?) ?? 1e9,
+          );
+          return byOrder != 0
+              ? byOrder
+              : (a.data()['name'] ?? '').toString().compareTo(
+                  (b.data()['name'] ?? '').toString(),
+                );
+        });
       setState(() {
-        _adminSkills = snapshot.docs.map((doc) {
+        _adminSkills = docs.map((doc) {
           final data = doc.data();
           return {
             'id': doc.id,
@@ -1014,8 +1130,9 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
           .get();
       if (!mounted) return;
       setState(() {
-        _reports =
-            snapshot.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
+        _reports = snapshot.docs
+            .map((doc) => {'id': doc.id, ...doc.data()})
+            .toList();
       });
     } catch (e) {
       print('Error loading reports: $e');
@@ -1031,15 +1148,15 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
       });
       _loadReports();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Report marked as $status')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Report marked as $status')));
     } catch (e) {
       print('Error updating report: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update report: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not update report: $e')));
     }
   }
 
@@ -1066,10 +1183,9 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
             onPressed: () async {
               Navigator.pop(dialogContext);
               try {
-                await _firestore
-                    .collection('users')
-                    .doc(userId)
-                    .update({'isBanned': true});
+                await _firestore.collection('users').doc(userId).update({
+                  'isBanned': true,
+                });
               } catch (e) {
                 print('Error suspending user: $e');
               }
@@ -1082,7 +1198,11 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
     );
   }
 
-  Future<bool> _addSkill(String name, String description, List<String> aliases) async {
+  Future<bool> _addSkill(
+    String name,
+    String description,
+    List<String> aliases,
+  ) async {
     try {
       await _firestore.collection('skills').add({
         'name': name,
@@ -1098,7 +1218,11 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
   }
 
   Future<bool> _updateSkill(
-      String docId, String name, String description, List<String> aliases) async {
+    String docId,
+    String name,
+    String description,
+    List<String> aliases,
+  ) async {
     try {
       await _firestore.collection('skills').doc(docId).update({
         'name': name,
@@ -1117,15 +1241,15 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
       await _firestore.collection('skills').doc(docId).delete();
       _loadSkills();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Skill '$name' deleted")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Skill '$name' deleted")));
     } catch (e) {
       print("Error deleting skill: $e");
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to delete skill: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Failed to delete skill: $e")));
     }
   }
 
@@ -1165,10 +1289,12 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
   /// normalize, it has to be an explicit mapping an admin defines.
   void _showSkillDialog({Map<String, dynamic>? existing}) {
     final isEditing = existing != null;
-    final skillNameController =
-        TextEditingController(text: existing?['name'] as String? ?? '');
-    final skillDescriptionController =
-        TextEditingController(text: existing?['description'] as String? ?? '');
+    final skillNameController = TextEditingController(
+      text: existing?['name'] as String? ?? '',
+    );
+    final skillDescriptionController = TextEditingController(
+      text: existing?['description'] as String? ?? '',
+    );
     final aliasesController = TextEditingController(
       text: (List<String>.from(existing?['aliases'] ?? [])).join(', '),
     );
@@ -1202,7 +1328,8 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                 decoration: const InputDecoration(
                   labelText: 'Aliases (Optional)',
                   hintText: 'e.g., JS, ECMAScript',
-                  helperText: 'Comma-separated. Typing an alias will match this skill.',
+                  helperText:
+                      'Comma-separated. Typing an alias will match this skill.',
                 ),
               ),
             ],
@@ -1224,16 +1351,25 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
                   .toList();
               Navigator.pop(dialogContext);
               final ok = isEditing
-                  ? await _updateSkill(existing['id'] as String, skillName,
-                      skillDescriptionController.text.trim(), aliases)
+                  ? await _updateSkill(
+                      existing['id'] as String,
+                      skillName,
+                      skillDescriptionController.text.trim(),
+                      aliases,
+                    )
                   : await _addSkill(
-                      skillName, skillDescriptionController.text.trim(), aliases);
+                      skillName,
+                      skillDescriptionController.text.trim(),
+                      aliases,
+                    );
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text(ok
-                      ? "Skill '$skillName' ${isEditing ? 'updated' : 'added'} successfully"
-                      : "Failed to ${isEditing ? 'update' : 'add'} skill '$skillName'"),
+                  content: Text(
+                    ok
+                        ? "Skill '$skillName' ${isEditing ? 'updated' : 'added'} successfully"
+                        : "Failed to ${isEditing ? 'update' : 'add'} skill '$skillName'",
+                  ),
                   backgroundColor: ok ? context.sw.give : Colors.redAccent,
                 ),
               );
@@ -1292,21 +1428,218 @@ class _AdminPageState extends State<AdminPage> with SingleTickerProviderStateMix
             : Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: _adminSkills.map((skill) {
-                  final name = (skill['name'] as String?) ?? '';
-                  final aliases = List<String>.from(skill['aliases'] ?? []);
-                  return InputChip(
-                    label: Text(aliases.isEmpty ? name : '$name (+${aliases.length})'),
-                    tooltip: aliases.isEmpty ? null : 'Aliases: ${aliases.join(', ')}',
-                    backgroundColor: context.sw.give.withValues(alpha: 0.08),
-                    side: BorderSide(color: context.sw.give.withValues(alpha: 0.3)),
-                    deleteIcon: Icon(Icons.clear, size: 18, color: context.sw.get),
-                    onDeleted: () => _confirmDeleteSkill((skill['id'] as String?) ?? '', name),
-                    onPressed: () => _showSkillDialog(existing: skill),
-                  );
-                }).toList(),
+                children:
+                    (_showAllCuratedSkills
+                            ? _adminSkills
+                            : _adminSkills.take(24))
+                        .map((skill) {
+                          final name = (skill['name'] as String?) ?? '';
+                          final aliases = List<String>.from(
+                            skill['aliases'] ?? [],
+                          );
+                          return InputChip(
+                            label: Text(
+                              aliases.isEmpty
+                                  ? name
+                                  : '$name (+${aliases.length})',
+                            ),
+                            tooltip: aliases.isEmpty
+                                ? null
+                                : 'Aliases: ${aliases.join(', ')}',
+                            backgroundColor: context.sw.give.withValues(
+                              alpha: 0.08,
+                            ),
+                            side: BorderSide(
+                              color: context.sw.give.withValues(alpha: 0.3),
+                            ),
+                            deleteIcon: Icon(
+                              Icons.clear,
+                              size: 18,
+                              color: context.sw.get,
+                            ),
+                            onDeleted: () => _confirmDeleteSkill(
+                              (skill['id'] as String?) ?? '',
+                              name,
+                            ),
+                            onPressed: () => _showSkillDialog(existing: skill),
+                          );
+                        })
+                        .toList(),
               ),
       ),
+      if (_adminSkills.length > 24)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: TextButton(
+              onPressed: () => setState(
+                () => _showAllCuratedSkills = !_showAllCuratedSkills,
+              ),
+              child: Text(
+                _showAllCuratedSkills
+                    ? 'Show fewer'
+                    : 'Show all ${_adminSkills.length} skills',
+              ),
+            ),
+          ),
+        ),
     ];
+  }
+}
+
+/// Skills users asked for that aren't in the catalog. Approving adds the
+/// skill to the catalog and to every requester's profile (server-side, via
+/// resolveSkillRequest); rejecting just closes the request.
+class _SkillRequestsSection extends StatefulWidget {
+  const _SkillRequestsSection();
+
+  @override
+  State<_SkillRequestsSection> createState() => _SkillRequestsSectionState();
+}
+
+class _SkillRequestsSectionState extends State<_SkillRequestsSection> {
+  final Set<String> _busy = {};
+
+  @override
+  void initState() {
+    super.initState();
+    SkillCatalogService.instance.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  Future<void> _resolve(String id, String name, bool approve) async {
+    String? category;
+    if (approve) {
+      final categories = {
+        ...SkillCatalogService.instance.categories.keys,
+        'Other',
+      }.toList();
+      category = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => SimpleDialog(
+          title: Text('Add "$name" to which category?'),
+          children: [
+            for (final c in categories)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialogContext, c),
+                child: Text(c),
+              ),
+          ],
+        ),
+      );
+      if (category == null) return;
+    }
+    if (!mounted) return;
+    setState(() => _busy.add(id));
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await FirebaseFunctions.instance
+          .httpsCallable('resolveSkillRequest')
+          .call({
+            'requestId': id,
+            'approve': approve,
+            'name': name,
+            if (category != null) 'category': category,
+          });
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            approve ? 'Added "$name" to the catalog.' : 'Rejected "$name".',
+          ),
+        ),
+      );
+    } on FirebaseFunctionsException catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(e.message ?? 'Could not update the request.')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy.remove(id));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.sw;
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('skillRequests')
+          .where('status', isEqualTo: 'pending')
+          .snapshots(),
+      builder: (context, snapshot) {
+        final docs = snapshot.data?.docs ?? const [];
+        if (docs.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Skill requests (${docs.length})',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: c.give,
+                ),
+              ),
+              const SizedBox(height: 6),
+              for (final doc in docs)
+                Builder(
+                  builder: (context) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    final name = (data['name'] as String?) ?? doc.id;
+                    final count = (data['count'] as num?)?.toInt() ?? 1;
+                    final busy = _busy.contains(doc.id);
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        title: Text(
+                          name,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          'Requested by $count ${count == 1 ? 'person' : 'people'}',
+                        ),
+                        trailing: busy
+                            ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Reject',
+                                    icon: Icon(
+                                      Icons.close_rounded,
+                                      color: c.textMuted,
+                                    ),
+                                    onPressed: () =>
+                                        _resolve(doc.id, name, false),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Approve',
+                                    icon: Icon(
+                                      Icons.check_circle_rounded,
+                                      color: c.success,
+                                    ),
+                                    onPressed: () =>
+                                        _resolve(doc.id, name, true),
+                                  ),
+                                ],
+                              ),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }

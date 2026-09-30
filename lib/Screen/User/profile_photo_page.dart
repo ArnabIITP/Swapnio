@@ -132,9 +132,11 @@ class _ProfilePhotoPageState extends State<ProfilePhotoPage> {
                         width: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : Text(_selectedImage == null
-                        ? 'Skip for now'
-                        : 'Upload and continue'),
+                    : Text(
+                        _selectedImage == null
+                            ? 'Skip for now'
+                            : 'Upload and continue',
+                      ),
               ),
             ],
           ),
