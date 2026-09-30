@@ -19,13 +19,22 @@ class GamificationProvider extends ChangeNotifier {
   Gamification? get gamification => _gamification;
 
   Future<void> _fetchGamification() async {
-    final doc = await FirebaseFirestore.instance.collection('gamification').doc(userId).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('gamification')
+        .doc(userId)
+        .get();
     if (doc.exists) {
       final data = doc.data()!;
       _gamification = Gamification(
         points: data['points'] ?? 0,
         level: data['level'] ?? 1,
         badges: List<String>.from(data['badges'] ?? []),
+        stats: {
+          for (final e in Map<String, dynamic>.from(
+            data['stats'] ?? const {},
+          ).entries)
+            if (e.value is num) e.key: e.value as num,
+        },
       );
     } else {
       _gamification = Gamification(points: 0, level: 1, badges: []);
