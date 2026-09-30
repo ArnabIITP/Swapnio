@@ -1,0 +1,6 @@
+
+# Local secrets for the emulator
+.secret.local
+
+# Emulator-only settings (fake Google Calendar)
+.env.local

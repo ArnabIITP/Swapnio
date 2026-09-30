@@ -1,0 +1,223 @@
+{
+  "version": 1,
+  "categories": [
+    {
+      "name": "Programming",
+      "skills": [
+        ["Python", ["py", "python3"]],
+        ["JavaScript", ["js", "ecmascript"]],
+        ["TypeScript", ["ts"]],
+        ["Java", []],
+        ["Kotlin", []],
+        ["Swift", []],
+        ["Dart", []],
+        ["Go", ["golang"]],
+        ["Rust", []],
+        ["C", []],
+        ["C++", ["cpp"]],
+        ["C#", ["c sharp", "csharp"]],
+        ["SQL", ["mysql"]],
+        ["HTML/CSS", ["html", "css", "html5", "css3"]],
+        ["React", ["reactjs", "react.js"]],
+        ["Next.js", ["nextjs", "next"]],
+        ["Vue.js", ["vue", "vuejs"]],
+        ["Angular", ["angularjs"]],
+        ["Node.js", ["node", "nodejs"]],
+        ["Tailwind CSS", ["tailwind"]],
+        ["Flutter", []],
+        ["React Native", []],
+        ["iOS Development", ["ios"]],
+        ["Android Development", ["android"]],
+        ["SwiftUI", []],
+        ["Mobile Development", ["app development"]],
+        ["Spring Boot", ["spring"]],
+        ["Django", []],
+        ["FastAPI", []],
+        ["GraphQL", []],
+        ["REST APIs", ["rest", "api design"]],
+        ["WebAssembly", ["wasm"]],
+        ["Firebase", []],
+        ["MongoDB", ["mongo"]],
+        ["PostgreSQL", ["postgres"]],
+        ["Git", ["github", "version control"]],
+        ["System Design", []],
+        ["Microservices", []],
+        ["Systems Programming", []]
+      ]
+    },
+    {
+      "name": "Data & AI",
+      "skills": [
+        ["Machine Learning", ["ml"]],
+        ["Deep Learning", ["dl", "neural networks"]],
+        ["Generative AI", ["genai", "llms", "prompt engineering"]],
+        ["Data Analysis", ["data analytics"]],
+        ["Data Visualization", ["dataviz"]],
+        ["Statistics", ["stats"]],
+        ["Pandas", []],
+        ["TensorFlow", []],
+        ["PyTorch", []],
+        ["Excel", ["microsoft excel", "spreadsheets"]],
+        ["Tableau", []],
+        ["Power BI", ["powerbi"]],
+        ["Business Intelligence", ["bi"]]
+      ]
+    },
+    {
+      "name": "Cloud, DevOps & Security",
+      "skills": [
+        ["AWS", ["amazon web services"]],
+        ["Google Cloud", ["gcp"]],
+        ["Azure", ["microsoft azure"]],
+        ["Cloud Computing", []],
+        ["Docker", []],
+        ["Kubernetes", ["k8s"]],
+        ["DevOps", ["ci/cd"]],
+        ["Linux", ["bash", "shell scripting"]],
+        ["Automation", []],
+        ["Cybersecurity", ["infosec", "security"]],
+        ["Ethical Hacking", ["penetration testing", "pentesting"]]
+      ]
+    },
+    {
+      "name": "Design",
+      "skills": [
+        ["UI/UX Design", ["ui design", "ux design", "ux", "ui", "ui/ux"]],
+        ["UX Research", ["user research", "user interviews", "usability testing"]],
+        ["Figma", []],
+        ["Prototyping", []],
+        ["Design Systems", []],
+        ["Graphic Design", []],
+        ["Brand Identity", ["branding", "logo design"]],
+        ["Adobe Illustrator", ["illustrator"]],
+        ["Photoshop", ["adobe photoshop"]],
+        ["Adobe XD", []],
+        ["Illustration", []],
+        ["Digital Art", []],
+        ["Procreate", []],
+        ["Visual Arts", []],
+        ["3D Modeling", ["3d modelling", "3d design"]],
+        ["Blender", []],
+        ["Motion Graphics", ["motion design", "animation"]]
+      ]
+    },
+    {
+      "name": "Video & Photography",
+      "skills": [
+        ["Video Editing", []],
+        ["Premiere Pro", ["adobe premiere", "premiere"]],
+        ["After Effects", ["ae"]],
+        ["DaVinci Resolve", ["davinci", "resolve"]],
+        ["Color Grading", ["colour grading"]],
+        ["Photography", []],
+        ["Photo Editing", []],
+        ["Lightroom", ["adobe lightroom"]],
+        ["YouTube Growth", ["youtube"]]
+      ]
+    },
+    {
+      "name": "Music",
+      "skills": [
+        ["Guitar", ["acoustic guitar", "electric guitar"]],
+        ["Bass Guitar", ["bass"]],
+        ["Piano", ["keyboard"]],
+        ["Drums", []],
+        ["Violin", []],
+        ["Ukulele", []],
+        ["Singing", ["vocals", "voice"]],
+        ["Songwriting", []],
+        ["Music Theory", []],
+        ["Music Production", []],
+        ["Ableton Live", ["ableton"]],
+        ["FL Studio", ["fruity loops"]],
+        ["Audio Engineering", ["mixing", "mastering"]]
+      ]
+    },
+    {
+      "name": "Languages",
+      "skills": [
+        ["English Fluency", ["english", "spoken english"]],
+        ["English Grammar", []],
+        ["Spanish", []],
+        ["French", []],
+        ["German", []],
+        ["Italian", []],
+        ["Portuguese", []],
+        ["Japanese", []],
+        ["Korean", []],
+        ["Mandarin", ["chinese"]],
+        ["Hindi", []],
+        ["Bengali", ["bangla"]],
+        ["Tamil", []],
+        ["Arabic", []]
+      ]
+    },
+    {
+      "name": "Business & Product",
+      "skills": [
+        ["Product Management", ["pm"]],
+        ["Roadmapping", []],
+        ["User Stories", []],
+        ["Agile", ["scrum", "kanban"]],
+        ["Project Management", []],
+        ["Entrepreneurship", ["startups"]],
+        ["Sales", []],
+        ["Negotiation", []],
+        ["Leadership", []],
+        ["Financial Modeling", ["financial modelling"]],
+        ["Accounting", []],
+        ["Investing", ["stock market", "trading"]],
+        ["Personal Finance", ["budgeting"]]
+      ]
+    },
+    {
+      "name": "Marketing & Writing",
+      "skills": [
+        ["Digital Marketing", []],
+        ["SEO", ["search engine optimization"]],
+        ["Social Media Marketing", ["social media"]],
+        ["Content Strategy", []],
+        ["Copywriting", []],
+        ["Creative Writing", []],
+        ["Storytelling", []],
+        ["Blogging", []]
+      ]
+    },
+    {
+      "name": "Communication & Career",
+      "skills": [
+        ["Public Speaking", []],
+        ["Interview Preparation", ["interviews", "mock interviews"]],
+        ["Resume Writing", ["cv writing"]],
+        ["Tutoring", ["teaching"]]
+      ]
+    },
+    {
+      "name": "Health & Fitness",
+      "skills": [
+        ["Yoga", []],
+        ["Meditation", ["mindfulness"]],
+        ["Fitness Coaching", ["personal training", "gym"]],
+        ["Calisthenics", []],
+        ["CrossFit", []],
+        ["Running", []],
+        ["Dance", ["dancing"]],
+        ["Nutrition", ["nutrition planning", "diet planning"]]
+      ]
+    },
+    {
+      "name": "Lifestyle & Hobbies",
+      "skills": [
+        ["Cooking", []],
+        ["Baking", []],
+        ["Meal Planning", []],
+        ["French Cuisine", []],
+        ["Chess", []],
+        ["Drawing", ["sketching"]],
+        ["Painting", []],
+        ["Gardening", []],
+        ["Philosophy", []]
+      ]
+    }
+  ]
+}

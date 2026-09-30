@@ -15,9 +15,78 @@
 const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { setGlobalOptions } = require('firebase-functions/v2');
 const admin = require('firebase-admin');
+const { FieldValue, Timestamp } = require('firebase-admin/firestore');
+const crypto = require('crypto');
 
 admin.initializeApp();
+
+// Cloud Run reserves CPU quota for each function's maximum instances, and
+// this project's regional quota is small: uncapped functions (default 100
+// instances, 1 vCPU each) exhausted it and blocked every deploy. Each
+// function is capped at 3 instances on a fractional CPU (the size gen-1
+// functions ran on), which is plenty for these light Firestore handlers.
+setGlobalOptions({ maxInstances: 3, cpu: 'gcf_gen1' });
+
+const sessions = require('./sessions');
+const streaks = require('./streaks');
+
+exports.checkInSession = sessions.checkInSession;
+exports.completeSwapSession = sessions.completeSwapSession;
+exports.refreshMyStats = sessions.refreshMyStats;
+exports.statsOnRating = sessions.statsOnRating;
+
+const skills = require('./skills');
+
+exports.syncSkillCatalog = skills.syncSkillCatalog;
+exports.canonicalizeUserSkills = skills.canonicalizeUserSkills;
+exports.requestSkill = skills.requestSkill;
+exports.resolveSkillRequest = skills.resolveSkillRequest;
+
+const referrals = require('./referrals');
+
+exports.claimReferral = referrals.claimReferral;
+exports.revokeReferral = referrals.revokeReferral;
+
+const schedule = require('./schedule');
+
+exports.proposeSession = schedule.proposeSession;
+exports.respondSession = schedule.respondSession;
+exports.cancelSession = schedule.cancelSession;
+exports.myCancellationStats = schedule.myCancellationStats;
+exports.requestReschedule = schedule.requestReschedule;
+exports.respondReschedule = schedule.respondReschedule;
+exports.busyTimes = schedule.busyTimes;
+exports.askToConnectCalendar = schedule.askToConnectCalendar;
+
+const calendar = require('./calendar');
+
+exports.connectGoogleCalendar = calendar.connectGoogleCalendar;
+exports.disconnectGoogleCalendar = calendar.disconnectGoogleCalendar;
+exports.calendarStatus = calendar.calendarStatus;
+exports.setBusySharing = calendar.setBusySharing;
+
+const verification = require('./verification');
+
+exports.syncVerification = verification.syncVerification;
+
+const security = require('./security');
+
+exports.registerDevice = security.registerDevice;
+exports.devicePresence = security.devicePresence;
+exports.signOutDevice = security.signOutDevice;
+exports.signOutOtherDevices = security.signOutOtherDevices;
+exports.startTwoFactorSetup = security.startTwoFactorSetup;
+exports.confirmTwoFactorSetup = security.confirmTwoFactorSetup;
+exports.verifyDeviceCode = security.verifyDeviceCode;
+exports.disableTwoFactor = security.disableTwoFactor;
+exports.twoFactorStatus = security.twoFactorStatus;
+exports.securityOnUserChange = security.securityOnUserChange;
+
+const web = require('./web');
+
+exports.mySwapWeb = web.mySwapWeb;
 
 exports.pushOnNotification = onDocumentCreated(
   'notifications/{notificationId}',
@@ -77,7 +146,7 @@ exports.pushOnNotification = onDocumentCreated(
         .collection('users')
         .doc(userId)
         .update({
-          fcmTokens: admin.firestore.FieldValue.arrayRemove(...staleTokens),
+          fcmTokens: FieldValue.arrayRemove(...staleTokens),
         });
     }
   },
@@ -159,7 +228,7 @@ exports.badgeOnCompletedSwap = onDocumentUpdated(
     // prove every matching document is readable by a non-admin caller and
     // rejects the whole request. A maintained counter sidesteps that.
     await db.collection('stats').doc('public').set(
-        { completedSwaps: admin.firestore.FieldValue.increment(1) },
+        { completedSwaps: FieldValue.increment(1) },
         { merge: true },
     );
 
@@ -191,6 +260,13 @@ exports.badgeOnCompletedSwap = onDocumentUpdated(
         );
       });
     }
+
+    // Teaching/learning time, streaks and the badges built on them.
+    for (const uid of participants) {
+      await sessions.refreshStatsAndBadges(uid);
+      // A referred user's first completed session qualifies their referral.
+      await referrals.qualifyReferral(uid);
+    }
   },
 );
 
@@ -206,15 +282,77 @@ exports.onUserCreated = onDocumentCreated('users/{uid}', async (event) => {
   const db = admin.firestore();
   const uid = event.params.uid;
   await awardGamification(db, uid, 0, ['welcome']);
+  await issuePassportNumberFor(db, uid);
 
   const count = await db.collection('users').count().get();
   await db.collection('stats').doc('public').set(
     {
       userCount: count.data().count,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     },
     { merge: true },
   );
+});
+
+// No 0/O or 1/I, so a number read off a shared image can't be mistyped.
+const PASSPORT_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+
+function formatPassportNumber(chars) {
+  return `SWP-${chars.slice(0, 4)}-${chars.slice(4, 8)}`;
+}
+
+/**
+ * Gives a user a Skill Passport number that no one else has, and keeps it.
+ *
+ * Every number is reserved in passportNumbers/{number} inside the same
+ * transaction that writes it to the user, so two users can never end up
+ * with the same one. The first choice is the number the app used to derive
+ * from the uid (so passports people already shared stay valid); only if
+ * that's taken does it fall back to random ones.
+ */
+async function issuePassportNumberFor(db, uid) {
+  const userRef = db.collection('users').doc(uid);
+  const derived = uid.replace(/[^A-Za-z0-9]/g, '').toUpperCase().padEnd(8, 'X');
+  const candidates = [formatPassportNumber(derived)];
+  for (let i = 0; i < 8; i++) {
+    let chars = '';
+    for (let j = 0; j < 8; j++) {
+      chars += PASSPORT_ALPHABET[crypto.randomInt(PASSPORT_ALPHABET.length)];
+    }
+    candidates.push(formatPassportNumber(chars));
+  }
+
+  for (const number of candidates) {
+    const issued = await db.runTransaction(async (tx) => {
+      const regRef = db.collection('passportNumbers').doc(number);
+      const [userSnap, regSnap] = await Promise.all([tx.get(userRef), tx.get(regRef)]);
+      if (!userSnap.exists) return null;
+      const existing = userSnap.get('passportNumber');
+      if (existing) return existing;
+      if (regSnap.exists) return null;
+      tx.create(regRef, { uid, issuedAt: FieldValue.serverTimestamp() });
+      tx.update(userRef, { passportNumber: number });
+      return number;
+    });
+    if (issued) return issued;
+  }
+  return null;
+}
+
+/**
+ * Returns the caller's passport number, issuing one first if they signed up
+ * before numbers were issued at account creation.
+ */
+exports.issuePassportNumber = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in first.');
+  }
+  const number = await issuePassportNumberFor(admin.firestore(), uid);
+  if (!number) {
+    throw new HttpsError('unavailable', 'Could not issue a passport number. Try again.');
+  }
+  return { passportNumber: number };
 });
 
 /**
@@ -230,6 +368,9 @@ exports.badgeOnFirstMessage = onDocumentCreated(
     const senderId = message.senderId;
     if (!senderId || senderId === 'system') return;
 
+    // Every message sent keeps the sender's daily streak (see streaks.js).
+    await streaks.recordActivity(senderId);
+
     const db = admin.firestore();
     const ref = db.collection('gamification').doc(senderId);
     const doc = await ref.get();
@@ -237,6 +378,15 @@ exports.badgeOnFirstMessage = onDocumentCreated(
     if (badges.includes('first_message')) return;
 
     await awardGamification(db, senderId, POINTS_FIRST_MESSAGE, ['first_message']);
+  },
+);
+
+/** Sending a swap request keeps the sender's daily streak. */
+exports.streakOnRequest = onDocumentCreated(
+  'swipeRequests/{requestId}',
+  async (event) => {
+    const request = event.data && event.data.data();
+    if (request) await streaks.recordActivity(request.fromUserId);
   },
 );
 
@@ -293,7 +443,7 @@ exports.trackSessionReliability = onDocumentUpdated(
 
     const db = admin.firestore();
     const participants = (after.participants || []).filter(Boolean);
-    const increment = admin.firestore.FieldValue.increment(1);
+    const increment = FieldValue.increment(1);
 
     if (after.status === 'completed') {
       await Promise.all(
@@ -308,6 +458,8 @@ exports.trackSessionReliability = onDocumentUpdated(
     }
 
     if (after.status === 'no_show') {
+      // A no-show breaks the blamed participant's reliability run.
+      await Promise.all(participants.map((uid) => sessions.refreshStatsAndBadges(uid)));
       const reporter = after.noShowReportedBy;
       const blamed = participants.filter((uid) => uid !== reporter);
       await Promise.all([
@@ -351,8 +503,8 @@ async function sendSessionReminders(db, {
   const nowMs = Date.now();
   const halfWindowMs = (windowMinutes / 2) * 60 * 1000;
   const targetMs = nowMs + offsetMinutes * 60 * 1000;
-  const windowStart = admin.firestore.Timestamp.fromMillis(targetMs - halfWindowMs);
-  const windowEnd = admin.firestore.Timestamp.fromMillis(targetMs + halfWindowMs);
+  const windowStart = Timestamp.fromMillis(targetMs - halfWindowMs);
+  const windowEnd = Timestamp.fromMillis(targetMs + halfWindowMs);
 
   const snapshot = await db
     .collection('swaps')
@@ -390,8 +542,9 @@ async function sendSessionReminders(db, {
           db.collection('notifications').add({
             userId: uid,
             type: 'session_reminder',
+            swapId: doc.id,
             message: messageFor(timeStr),
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            timestamp: FieldValue.serverTimestamp(),
             read: false,
             senderName: 'Swapnio',
             senderPhoto: '',
@@ -403,6 +556,8 @@ async function sendSessionReminders(db, {
 
 exports.sessionReminders = onSchedule('every 15 minutes', async () => {
   const db = admin.firestore();
+  await sessions.remindUnconfirmed();
+  await streaks.remindStreaks();
   await sendSessionReminders(db, {
     offsetMinutes: 60,
     windowMinutes: 20,
@@ -477,7 +632,14 @@ async function wipeUserCompletely(db, uid) {
   await deleteDocs('ratingsGiven',
       await db.collection('ratings').where('fromUserId', '==', uid).get());
 
-  // Gamification and the user document itself (with its subcollections).
+  // Security data: the log and referral records.
+  await deleteDocs('securityEvents',
+      await db.collection('securityEvents').where('uid', '==', uid).get());
+  await deleteDocs('referralsAsInvitee',
+      await db.collection('referrals').where('refereeId', '==', uid).get());
+
+  // Gamification and the user document itself (with its subcollections -
+  // including devices and the private two-factor record).
   await db.recursiveDelete(db.collection('gamification').doc(uid));
   await db.recursiveDelete(db.collection('users').doc(uid));
   deleted.profile = 1;
@@ -495,7 +657,7 @@ async function wipeUserCompletely(db, uid) {
   // Keep the public signup counter honest.
   try {
     await db.collection('stats').doc('public').set(
-        { userCount: admin.firestore.FieldValue.increment(-1) },
+        { userCount: FieldValue.increment(-1) },
         { merge: true },
     );
   } catch (_) {
@@ -527,6 +689,9 @@ exports.adminDeleteUser = onCall(async (request) => {
 
   const { authDeleted, deleted } = await wipeUserCompletely(db, uid);
   console.log(`adminDeleteUser: ${callerUid} deleted ${uid}`, deleted, { authDeleted });
+  // A minimal audit trail survives the deletion (90-day retention).
+  await security.logEvent(uid, 'account_deleted', { detail: 'by an admin' });
+  await security.logEvent(callerUid, 'admin_deleted_user', { detail: uid });
   return { ok: true, authDeleted, deleted };
 });
 
@@ -543,5 +708,6 @@ exports.selfDeleteAccount = onCall(async (request) => {
   const db = admin.firestore();
   const { authDeleted, deleted } = await wipeUserCompletely(db, uid);
   console.log(`selfDeleteAccount: ${uid} deleted their own account`, deleted, { authDeleted });
+  await security.logEvent(uid, 'account_deleted', { detail: 'by the user' });
   return { ok: true, authDeleted, deleted };
 });
