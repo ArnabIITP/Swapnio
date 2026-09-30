@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'verification_model.dart';
@@ -14,6 +15,32 @@ class VerificationProvider extends ChangeNotifier {
   String? _verificationError;
 
   Verification? get verification => _verification;
+
+  /// The linked number with all but the last 4 digits hidden.
+  String? get maskedPhone {
+    final p = _auth.currentUser?.phoneNumber;
+    if (p == null || p.length < 5) return p;
+    return '•••••• ${p.substring(p.length - 4)}';
+  }
+
+  /// Copies the Auth state to the server so the verified ring, badge and
+  /// Discover perks follow it. Returns true the first time the account
+  /// becomes verified (the +50 points were just awarded).
+  Future<bool> syncWithServer() async {
+    try {
+      final r = await FirebaseFunctions.instance
+          .httpsCallable('syncVerification')
+          .call();
+      return (r.data as Map)['rewarded'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Set when the last successful step made the account verified for the
+  /// first time.
+  bool lastRewarded = false;
+
   bool get phoneVerificationInProgress => _phoneVerificationInProgress;
   bool get codeSent => _codeSent;
   String? get verificationError => _verificationError;
@@ -67,7 +94,13 @@ class VerificationProvider extends ChangeNotifier {
         },
         verificationFailed: (FirebaseAuthException e) {
           _phoneVerificationInProgress = false;
-          _verificationError = e.message ?? 'Phone verification failed.';
+          _verificationError = switch (e.code) {
+            'invalid-phone-number' =>
+              "That number doesn't look right. Include the country code, e.g. +91.",
+            'too-many-requests' =>
+              'Too many attempts from this phone. Try again later.',
+            _ => e.message ?? 'Phone verification failed.',
+          };
           notifyListeners();
         },
         codeSent: (String verificationId, int? resendToken) {
@@ -108,7 +141,7 @@ class VerificationProvider extends ChangeNotifier {
       return await _linkPhoneCredential(credential);
     } catch (e) {
       _phoneVerificationInProgress = false;
-      _verificationError = 'Invalid code. Please try again.';
+      _verificationError = "That code isn't right. Please try again.";
       notifyListeners();
       return false;
     }
@@ -139,14 +172,24 @@ class VerificationProvider extends ChangeNotifier {
       _verificationId = null;
       _verificationError = null;
       await _fetchVerification();
+      lastRewarded = await syncWithServer();
       return true;
     } on FirebaseAuthException catch (e) {
       _phoneVerificationInProgress = false;
-      if (e.code == 'credential-already-in-use') {
-        _verificationError = 'This phone number is linked to another account.';
-      } else {
-        _verificationError = e.message ?? 'Phone verification failed.';
-      }
+      _verificationError = switch (e.code) {
+        // Firebase Auth allows one number per account.
+        'credential-already-in-use' ||
+        'account-exists-with-different-credential' =>
+          'This number is already connected to another Swapnio account. '
+              'Each number can verify only one account.',
+        'invalid-verification-code' =>
+          "That code isn't right. Please try again.",
+        'session-expired' ||
+        'code-expired' => 'That code expired. Send a new one.',
+        'provider-already-linked' =>
+          'A number is already linked to this account.',
+        _ => e.message ?? 'Phone verification failed.',
+      };
       notifyListeners();
       return false;
     } catch (e) {
@@ -166,8 +209,11 @@ class VerificationProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Re-reads Auth (e.g. after tapping the email link) and syncs the result.
   Future<void> reload() async {
     await _auth.currentUser?.reload();
     await _fetchVerification();
+    lastRewarded = await syncWithServer();
+    notifyListeners();
   }
 }

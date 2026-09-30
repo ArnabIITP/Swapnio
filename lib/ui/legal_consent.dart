@@ -29,9 +29,9 @@ class LegalConsentCheckboxes extends StatefulWidget {
 
 class _LegalConsentCheckboxesState extends State<LegalConsentCheckboxes> {
   late final TapGestureRecognizer _termsTap = TapGestureRecognizer()
-    ..onTap = () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const LegalPage()),
-        );
+    ..onTap = () => Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const LegalPage()));
 
   @override
   void dispose() {
@@ -55,7 +55,11 @@ class _LegalConsentCheckboxesState extends State<LegalConsentCheckboxes> {
           toggleOnTapText: false,
           child: RichText(
             text: TextSpan(
-              style: GoogleFonts.manrope(fontSize: 13, color: c.text, height: 1.4),
+              style: GoogleFonts.manrope(
+                fontSize: 13,
+                color: c.text,
+                height: 1.4,
+              ),
               children: [
                 const TextSpan(text: 'I agree to the '),
                 TextSpan(
@@ -74,7 +78,11 @@ class _LegalConsentCheckboxesState extends State<LegalConsentCheckboxes> {
           onChanged: widget.onAgeChanged,
           child: Text(
             'I confirm that I am 18 years of age or older',
-            style: GoogleFonts.manrope(fontSize: 13, color: c.text, height: 1.4),
+            style: GoogleFonts.manrope(
+              fontSize: 13,
+              color: c.text,
+              height: 1.4,
+            ),
           ),
         ),
       ],
@@ -107,7 +115,9 @@ class _LegalConsentCheckboxesState extends State<LegalConsentCheckboxes> {
               activeColor: c.give,
               visualDensity: VisualDensity.compact,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(5),
+              ),
             ),
           ),
           const SizedBox(width: 10),

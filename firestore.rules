@@ -51,8 +51,19 @@ service cloud.firestore {
     // perfect rating/attendance record with one Firestore write. This list
     // is what closes that off while leaving normal profile edits untouched.
     function protectedUserFields() {
+      // passportNumber is issued by the issuePassportNumber Cloud Function,
+      // which reserves it in passportNumbers/{number} - a client-written one
+      // could claim someone else's number.
       return ['isAdmin', 'isBanned', 'rating', 'ratingsCount', 'completedSwaps',
-              'sessionsAttended', 'noShowCount'];
+              'sessionsAttended', 'noShowCount', 'passportNumber',
+              // Referral attribution and its reward - set once by the
+              // claimReferral function.
+              'referredBy', 'referredAt', 'boostUntil',
+              // Verified status - copied from Firebase Auth by the
+              // syncVerification function.
+              'verified', 'emailVerified', 'phoneVerified', 'verifiedAt',
+              // Google Calendar connection - set by functions/calendar.js.
+              'calendarConnected'];
     }
 
     // The `update` guard above doesn't cover `create` - a brand-new account's
@@ -67,7 +78,10 @@ service cloud.firestore {
         && (!('ratingsCount' in data) || data.ratingsCount == 0)
         && (!('completedSwaps' in data) || data.completedSwaps == 0)
         && (!('sessionsAttended' in data) || data.sessionsAttended == 0)
-        && (!('noShowCount' in data) || data.noShowCount == 0);
+        && (!('noShowCount' in data) || data.noShowCount == 0)
+        && !data.keys().hasAny(['passportNumber', 'referredBy', 'referredAt', 'boostUntil',
+                                'verified', 'emailVerified', 'phoneVerified', 'verifiedAt',
+                                'calendarConnected']);
     }
 
     // No-show enforcement: someone who repeatedly fails to turn up loses the
@@ -107,6 +121,19 @@ service cloud.firestore {
         || (isSignedIn() && !isSelf(userId) && changedKeysOnly(['rating', 'ratingsCount', 'completedSwaps', 'lastUpdated']))
         || isAdmin();
       allow delete: if isSelf(userId) || isAdmin();
+
+      // Devices signed in to this account (registerDevice function). The
+      // owner sees them in Settings > Security; only the server writes.
+      match /devices/{deviceId} {
+        allow read: if isSelf(userId) || isAdmin();
+        allow write: if false;
+      }
+
+      // Two-factor secret and backup-code hashes - server only, no client
+      // access at all.
+      match /private/{docId} {
+        allow read, write: if false;
+      }
 
       // Per-user preferences (notifications / privacy / appearance).
       match /settings/{docId} {
@@ -185,17 +212,73 @@ service cloud.firestore {
       // without it, Firestore rejects that query outright since it can't
       // verify the participants-only rule for every possible matching doc.
       allow read: if isSignedIn() && (uid() in resource.data.participants || isAdmin());
-      allow create: if isSignedIn()
-        && uid() in request.resource.data.participants
-        && isReliableEnough();
-      allow update: if isSignedIn() && uid() in resource.data.participants;
+      // Proposing, accepting, declining, cancelling and rescheduling go
+      // through Cloud Functions (functions/schedule.js) so every change is
+      // checked against both people's calendars; checking in and completing
+      // go through functions/sessions.js, which enforce both check-ins and
+      // the minimum length. The only direct write left is reporting that an
+      // accepted session never happened.
+      allow create: if false;
+      allow update: if isSignedIn()
+        && uid() in resource.data.participants
+        && resource.data.status == 'accepted'
+        && request.resource.data.status == 'no_show'
+        && resource.data.get('startedAt', null) == null
+        && request.resource.data.get('noShowReportedBy', null) == uid()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'noShowReportedBy', 'updatedAt']);
       allow delete: if isAdmin();
+    }
+
+    function sessionTimingFields() {
+      return ['checkIns', 'startedAt', 'endedAt', 'durationMinutes',
+              'completionConfirmations', 'completedAt', 'goalAchieved',
+              'sessionNotesBy'];
     }
 
     // -------------------------------------------------- curated skills (admin)
     match /skills/{skillId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
+    }
+
+    // "Connect your calendar" nudge bookkeeping - server only.
+    match /calendarNudges/{id} {
+      allow read, write: if false;
+    }
+
+    // Automatic flags for admins (e.g. frequent cancellations).
+    match /adminFlags/{flagId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Security log - written only by Cloud Functions, 90-day retention.
+    match /securityEvents/{eventId} {
+      allow read: if isSignedIn() && (resource.data.uid == uid() || isAdmin());
+      allow write: if false;
+    }
+
+
+    // Referral records - created and qualified only by Cloud Functions;
+    // readable by the two people involved.
+    match /referrals/{refereeId} {
+      allow read: if isSignedIn()
+        && (resource.data.referrerId == uid() || resource.data.refereeId == uid() || isAdmin());
+      allow write: if false;
+    }
+
+    // Catalog version marker, written by the syncSkillCatalog function.
+    match /meta/{docId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // Requests for skills that aren't in the catalog yet - filed and resolved
+    // only through the requestSkill / resolveSkillRequest functions.
+    match /skillRequests/{requestId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     // ------------------------------------------------------ gamification data
