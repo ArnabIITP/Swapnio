@@ -49,6 +49,13 @@ class _CalendarPageState extends State<CalendarPage> {
     switch (status) {
       case 'completed':
         return (label: 'Completed', color: c.get, dashed: false, struck: false);
+      case 'awaiting_ratings':
+        return (
+          label: 'Waiting for ratings',
+          color: c.get,
+          dashed: false,
+          struck: false,
+        );
       case 'cancelled':
         return (
           label: 'Cancelled',

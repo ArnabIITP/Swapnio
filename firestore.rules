@@ -228,23 +228,12 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------- ratings / swap reviews
-    // A rating is only accepted for a *completed* swap the rater took part in.
+    // One rating per person per session, written by the server.
     match /ratings/{ratingId} {
       allow read: if isSignedIn();
-      // The id is <swapId>_<raterUid>, so each person rates a session once
-      // (a second create is an overwrite, which isn't allowed), and only the
-      // other person in that completed session can be rated.
-      allow create: if isSignedIn()
-        && request.resource.data.fromUserId == uid()
-        && request.resource.data.toUserId != uid()
-        && request.resource.data.swapId is string
-        && ratingId == request.resource.data.swapId + '_' + uid()
-        && request.resource.data.rating is number
-        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
-        && exists(/databases/$(database)/documents/swaps/$(request.resource.data.swapId))
-        && uid() in get(/databases/$(database)/documents/swaps/$(request.resource.data.swapId)).data.participants
-        && request.resource.data.toUserId in get(/databases/$(database)/documents/swaps/$(request.resource.data.swapId)).data.participants
-        && get(/databases/$(database)/documents/swaps/$(request.resource.data.swapId)).data.status == 'completed';
+      // Ratings are given per session through the rateSession function
+      // (after both people confirm it) - never written from the app.
+      allow create: if false;
       allow update, delete: if isAdmin();
     }
 

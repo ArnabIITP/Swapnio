@@ -11,7 +11,8 @@ import 'package:flutter/foundation.dart';
 ///
 /// Data model
 ///   complaints/{autoId} -> { userId, userName, userEmail, subject,
-///                            description, status: 'open' | 'in_progress' |
+///                            description, sessionCode?, swapId?,
+///                            status: 'open' | 'in_progress' |
 ///                            'resolved', createdAt, resolvedAt, resolutionNote }
 class ComplaintService {
   ComplaintService._();
@@ -27,6 +28,8 @@ class ComplaintService {
   Future<bool> submitComplaint({
     required String subject,
     required String description,
+    String sessionCode = '',
+    String swapId = '',
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return false;
@@ -37,6 +40,9 @@ class ComplaintService {
         'userEmail': user.email ?? '',
         'subject': subject,
         'description': description,
+        // The session this is about, if any (SES-XXXX-XXXX + its doc id).
+        if (sessionCode.isNotEmpty) 'sessionCode': sessionCode,
+        if (swapId.isNotEmpty) 'swapId': swapId,
         'status': statusOpen,
         'createdAt': FieldValue.serverTimestamp(),
       });

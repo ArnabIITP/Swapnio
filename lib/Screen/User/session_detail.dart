@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
@@ -10,6 +11,7 @@ import '../../services/swap_service.dart';
 import '../../theme.dart';
 import '../../ui/session_actions.dart';
 import '../../ui/swapnio_widgets.dart';
+import 'complaint_page.dart';
 
 /// Everything about one swap session in one place, built for the moments
 /// right before it: a live countdown creates anticipation, and the join
@@ -165,6 +167,10 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
               children: [
                 _hero(status, when, sides, firstName),
                 const SizedBox(height: 16),
+                if (status == SwapSessionService.statusAwaitingRatings) ...[
+                  _ratingCard(data, firstName),
+                  const SizedBox(height: 16),
+                ],
                 if (status == SwapSessionService.statusAccepted) ...[
                   if (data['startedAt'] == null)
                     RescheduleRequestBanner(swapId: widget.swapId, data: data),
@@ -179,7 +185,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                   _agendaCard(agenda),
                   const SizedBox(height: 16),
                 ],
-                if (notes.isNotEmpty)
+                if (notes.isNotEmpty) ...[
                   _surfaceCard(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,10 +206,124 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 16),
+                ],
+                _sessionIdCard(data),
               ],
             ),
           ),
           _actionBar(status, data, participants, link, when),
+        ],
+      ),
+    );
+  }
+
+  /// A confirmed session isn't counted until both have rated it: ask if I
+  /// haven't, otherwise say who we're waiting on.
+  Widget _ratingCard(Map<String, dynamic> data, String firstName) {
+    final c = context.sw;
+    final rated = ((data['ratedBy'] as Map?) ?? const {}).containsKey(_uid);
+    return _surfaceCard(
+      child: Row(
+        children: [
+          Icon(
+            rated ? Icons.hourglass_top_rounded : Icons.star_outline_rounded,
+            color: c.get,
+            size: 26,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  rated ? "Waiting for $firstName's rating" : 'How did it go?',
+                  style: GoogleFonts.manrope(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: c.text,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  rated
+                      ? "Thanks for rating. It's added to both your records once they rate too."
+                      : "Add your rating and it's added to both your records once you've both rated.",
+                  style: GoogleFonts.manrope(
+                    fontSize: 12.5,
+                    height: 1.4,
+                    color: c.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (!rated) ...[
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: () => rateSessionFlow(context, widget.swapId, data),
+              child: const Text('Rate'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// The session's readable id - what to quote when reporting it.
+  Widget _sessionIdCard(Map<String, dynamic> data) {
+    final c = context.sw;
+    final code = (data['sessionCode'] as String?) ?? '';
+    if (code.isEmpty) return const SizedBox.shrink();
+    return _surfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('SESSION ID', style: AppTheme.label(color: c.textMuted)),
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      code,
+                      style: GoogleFonts.manrope(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.2,
+                        color: c.text,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Copy session ID',
+                icon: Icon(Icons.copy_rounded, color: c.text),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: code));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Session ID copied')),
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          TextButton.icon(
+            style: TextButton.styleFrom(padding: EdgeInsets.zero),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    ComplaintPage(sessionCode: code, swapId: widget.swapId),
+              ),
+            ),
+            icon: const Icon(Icons.flag_outlined, size: 18),
+            label: const Text('Report a problem with this session'),
+          ),
         ],
       ),
     );
@@ -246,6 +366,9 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
     if (status == SwapSessionService.statusCompleted) {
       eyebrow = 'COMPLETED';
       big = Text('Swap done', style: num);
+    } else if (status == SwapSessionService.statusAwaitingRatings) {
+      eyebrow = 'CONFIRMED BY BOTH';
+      big = Text('Almost done', style: num);
     } else if (status == SwapSessionService.statusNoShow) {
       eyebrow = 'DID NOT HAPPEN';
       big = Text('No-show', style: num.copyWith(color: Colors.white70));

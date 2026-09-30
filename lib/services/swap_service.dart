@@ -18,7 +18,10 @@ import '../features/analytics/analytics_provider.dart';
 ///   skillOffered:   what the organiser will teach
 ///   skillWanted:    what the organiser wants to learn
 ///   scheduledFor:   Timestamp of the agreed session
-///   status:         'pending' | 'accepted' | 'declined' | 'completed' | 'no_show'
+///   status:         'pending' | 'accepted' | 'awaiting_ratings' | 'completed'
+///                   | 'declined' | 'cancelled' | 'no_show'
+///   sessionCode:    readable id for reports, e.g. SES-7K3P-9QXA
+///   ratedBy:        { uid: time } - who has rated this session
 ///   createdBy:      uid
 ///   createdAt / completedAt
 ///   noShowReportedBy: uid of whoever flagged the no-show (accountability)
@@ -55,6 +58,9 @@ class SwapSessionService {
   static const String statusAccepted = 'accepted';
   static const String statusDeclined = 'declined';
   static const String statusCompleted = 'completed';
+
+  /// Both confirmed it; it counts once both have rated each other.
+  static const String statusAwaitingRatings = 'awaiting_ratings';
   static const String statusNoShow = 'no_show';
 
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
@@ -272,7 +278,8 @@ class SwapSessionService {
   /// Confirms the session happened. Both participants must confirm before it
   /// counts - there is no automatic confirmation - the server enforces
   /// the check-ins and the minimum length and awards points and badges.
-  Future<({bool ok, bool completed, String? error})> confirmCompletion(
+  Future<({bool ok, bool completed, bool awaitingRatings, String? error})>
+  confirmCompletion(
     String swapId, {
     String sessionNotes = '',
     bool goalAchieved = true,
@@ -287,11 +294,13 @@ class SwapSessionService {
             'goalAchieved': goalAchieved,
           });
       final completed = (result.data as Map?)?['completed'] == true;
+      final awaitingRatings =
+          (result.data as Map?)?['awaitingRatings'] == true;
       final uid = _uid;
       if (uid != null) {
         AnalyticsProvider.log('session_completed', uid, {
           'swapId': swapId,
-          'confirmedByBoth': completed,
+          'confirmedByBoth': awaitingRatings,
         });
         // Progress Dashboard bookkeeping (self-written, not trusted by the
         // passport): record this user's side of the swap.
@@ -307,12 +316,63 @@ class SwapSessionService {
           }
         }
       }
-      return (ok: true, completed: completed, error: null);
+      return (
+        ok: true,
+        completed: completed,
+        awaitingRatings: awaitingRatings,
+        error: null,
+      );
     } on FirebaseFunctionsException catch (e) {
-      return (ok: false, completed: false, error: e.message);
+      return (
+        ok: false,
+        completed: false,
+        awaitingRatings: false,
+        error: e.message,
+      );
     } catch (e) {
       debugPrint('SwapSessionService.confirmCompletion failed: $e');
-      return (ok: false, completed: false, error: null);
+      return (ok: false, completed: false, awaitingRatings: false, error: null);
+    }
+  }
+
+  /// Whether the current user already rated [swapId].
+  Future<bool> hasRated(String swapId) async {
+    final uid = _uid;
+    if (uid == null) return false;
+    try {
+      final snap = await _firestore.collection('swaps').doc(swapId).get();
+      return ((snap.data()?['ratedBy'] as Map?) ?? const {}).containsKey(uid);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Rates the other person for a confirmed session (rateSession function).
+  /// The second rating completes the session so it starts counting.
+  Future<({bool completed, String? error})> rateSession(
+    String swapId, {
+    required double rating,
+    String review = '',
+    List<String> tags = const [],
+  }) async {
+    try {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('rateSession')
+          .call({
+            'swapId': swapId,
+            'rating': rating,
+            'review': review,
+            'tags': tags,
+          });
+      return (
+        completed: (result.data as Map?)?['completed'] == true,
+        error: null,
+      );
+    } on FirebaseFunctionsException catch (e) {
+      return (completed: false, error: e.message ?? 'Could not save your rating.');
+    } catch (e) {
+      debugPrint('SwapSessionService.rateSession failed: $e');
+      return (completed: false, error: 'Could not save your rating. Try again.');
     }
   }
 
@@ -358,29 +418,6 @@ class SwapSessionService {
     }
   }
 
-  /// The id of a completed session between the current user and [otherUserId],
-  /// or null when the two have not finished a swap yet.
-  Future<String?> completedSessionWith(String otherUserId) async {
-    final uid = _uid;
-    if (uid == null) return null;
-    try {
-      final snapshot = await _firestore
-          .collection('swaps')
-          .where('participants', arrayContains: uid)
-          .where('status', isEqualTo: statusCompleted)
-          .limit(20)
-          .get();
-      for (final doc in snapshot.docs) {
-        final participants = List<String>.from(
-          doc.data()['participants'] ?? [],
-        );
-        if (participants.contains(otherUserId)) return doc.id;
-      }
-    } catch (e) {
-      debugPrint('SwapSessionService.completedSessionWith failed: $e');
-    }
-    return null;
-  }
 }
 
 /// The outcome of a scheduling call: done, needs the caller to confirm

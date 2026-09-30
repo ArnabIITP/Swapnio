@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import '../User/session_detail.dart';
 import 'package:intl/intl.dart';
 import '../../theme.dart';
 import '../../services/complaint_service.dart';
@@ -255,6 +256,8 @@ class _ComplaintsPageState extends State<ComplaintsPage> {
     final userEmail = (data['userEmail'] ?? '').toString();
     final createdAt = data['createdAt'] as Timestamp?;
     final resolutionNote = (data['resolutionNote'] ?? '').toString();
+    final sessionCode = (data['sessionCode'] ?? '').toString();
+    final swapId = (data['swapId'] ?? '').toString();
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -275,6 +278,24 @@ class _ComplaintsPageState extends State<ComplaintsPage> {
             Text(
               userEmail.isNotEmpty ? '$userName · $userEmail' : userName,
               style: TextStyle(fontSize: 12, color: context.sw.textMuted),
+            ),
+          ],
+          if (sessionCode.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            InkWell(
+              onTap: swapId.isEmpty
+                  ? null
+                  : () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => SessionDetailPage(swapId: swapId),
+                        ),
+                      ),
+              child: TintTag(
+                'Session $sessionCode',
+                color: context.sw.get,
+                icon: Icons.event_note_rounded,
+              ),
             ),
           ],
           const SizedBox(height: 6),

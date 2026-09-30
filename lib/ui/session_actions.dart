@@ -16,6 +16,7 @@ import '../services/google_calendar_service.dart';
 import '../services/swap_service.dart';
 import '../theme.dart';
 import 'celebration.dart';
+import 'rate_session_sheet.dart';
 import 'session_time_picker.dart';
 import 'swapnio_kit.dart';
 import 'swapnio_widgets.dart';
@@ -416,15 +417,14 @@ Future<void> cancelSessionFlow(
 }
 
 /// Confirming captures what actually happened - notes and whether the goal
-/// was met. The session only counts once both people confirm, so the first
-/// confirmation shows a "waiting for your partner" note and the second one
-/// celebrates, because finishing a session is the end of the core loop.
+/// was met. A session only counts once both people have confirmed it AND
+/// rated each other, so the first confirmation shows a "waiting for your
+/// partner" note and the second opens the rating straight away.
 Future<void> completeSessionFlow(
   BuildContext context,
   String swapId,
-  Map<String, dynamic> swapData, {
-  VoidCallback? onRate,
-}) async {
+  Map<String, dynamic> swapData,
+) async {
   final notesController = TextEditingController();
   bool goalAchieved = true;
 
@@ -489,19 +489,56 @@ Future<void> completeSessionFlow(
     );
     return;
   }
-  if (!result.completed) {
+  if (!result.awaitingRatings) {
     messenger.showSnackBar(
       const SnackBar(
         content: Text(
-          "Confirmed. It counts as soon as your partner confirms too - "
-          "we'll remind them.",
+          "Confirmed. Once your partner confirms too, you'll both rate the "
+          "session - we'll remind them.",
         ),
         duration: Duration(seconds: 5),
       ),
     );
     return;
   }
+  if (!context.mounted) return;
+  await rateSessionFlow(context, swapId, swapData);
+}
 
+/// Opens the rating for a confirmed session, then celebrates if that was
+/// the rating that made it count.
+Future<void> rateSessionFlow(
+  BuildContext context,
+  String swapId,
+  Map<String, dynamic> swapData,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final completed = await showRateSessionSheet(
+    context,
+    swapId: swapId,
+    otherName: sessionOtherFirstName(swapData),
+  );
+  if (!context.mounted) return;
+  if (completed) {
+    await celebrateCompletedSession(context);
+    return;
+  }
+  // Closed without rating, or rated first: either way it isn't counted yet.
+  final rated = await SwapSessionService.instance.hasRated(swapId);
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text(
+        rated
+            ? "Thanks! It's added once ${sessionOtherFirstName(swapData)} rates too."
+            : 'No rush - you can add your rating from the session anytime.',
+      ),
+      duration: const Duration(seconds: 5),
+    ),
+  );
+}
+
+/// The payoff once both have rated: the session now counts.
+Future<void> celebrateCompletedSession(BuildContext context) async {
   final completedCount = await _completedSessionCount();
   if (!context.mounted) return;
   // Show the badge itself when this swap crossed a milestone.
@@ -519,12 +556,10 @@ Future<void> completeSessionFlow(
         ? 'Your first swap is done!'
         : 'Swap #$completedCount complete!',
     message:
-        'You both earned points. Leave a rating while it is fresh - '
-        'it is what makes reputation here mean something.',
+        "You've both rated it, so it now counts - hours, badges and your "
+        'Skill Passport are updated, and you both earned points.',
     extra: const AnimatedPointsBadge(points: 25),
-    primaryLabel: 'Rate this swap',
-    onPrimary: onRate ?? () {},
-    secondaryLabel: 'Later',
+    primaryLabel: 'Nice',
   );
 }
 
@@ -534,13 +569,11 @@ Future<void> completeSessionFlow(
 class SessionTimerPanel extends StatefulWidget {
   final String swapId;
   final Map<String, dynamic> data;
-  final VoidCallback? onRate;
 
   const SessionTimerPanel({
     super.key,
     required this.swapId,
     required this.data,
-    this.onRate,
   });
 
   @override
@@ -598,12 +631,7 @@ class _SessionTimerPanelState extends State<SessionTimerPanel> {
 
   Future<void> _complete() async {
     setState(() => _busy = true);
-    await completeSessionFlow(
-      context,
-      widget.swapId,
-      widget.data,
-      onRate: widget.onRate,
-    );
+    await completeSessionFlow(context, widget.swapId, widget.data);
     if (mounted) setState(() => _busy = false);
   }
 

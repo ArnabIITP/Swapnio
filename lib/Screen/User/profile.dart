@@ -44,6 +44,13 @@ class _ProfilePageState extends State<ProfilePage>
   late TabController _tabController;
   bool _isSettingsSheetOpen = false;
 
+  /// Server-counted stats (teaching + learning minutes) for the header.
+  final Stream<DocumentSnapshot<Map<String, dynamic>>> _statsStream =
+      FirebaseFirestore.instance
+          .collection('gamification')
+          .doc(FirebaseAuth.instance.currentUser?.uid ?? '_')
+          .snapshots();
+
   /// The header gear icon toggles the settings panel open/closed - tapping
   /// again while it's open dismisses it instead of stacking another sheet.
   void _toggleSettingsSheet(Map<String, dynamic> userData) {
@@ -296,6 +303,7 @@ class _ProfilePageState extends State<ProfilePage>
     final wanted = List<String>.from(userData['skillsWanted'] ?? []);
     final rating = (userData['rating'] as num?)?.toDouble() ?? 0.0;
     final swaps = (userData['completedSwaps'] as num?)?.toInt() ?? 0;
+    final ratingsCount = (userData['ratingsCount'] as num?)?.toInt() ?? 0;
 
     return Container(
       color: c.bg,
@@ -390,7 +398,10 @@ class _ProfilePageState extends State<ProfilePage>
             children: [
               Expanded(
                 child: _buildStatCard(
-                  label: 'rating',
+                  // The average of every session rating received.
+                  label: ratingsCount > 0
+                      ? 'avg of $ratingsCount'
+                      : 'rating',
                   value: rating > 0 ? rating.toStringAsFixed(1) : '-',
                   countValue: rating > 0 ? rating : null,
                   decimals: 1,
@@ -400,20 +411,37 @@ class _ProfilePageState extends State<ProfilePage>
               const SizedBox(width: 10),
               Expanded(
                 child: _buildStatCard(
-                  label: 'swaps',
+                  label: swaps == 1 ? 'session' : 'sessions',
                   value: '$swaps',
                   countValue: swaps,
                   color: c.get,
                 ),
               ),
               const SizedBox(width: 10),
+              // Time from sessions that counted (both confirmed and rated),
+              // taught plus learned - under an hour in minutes.
               Expanded(
-                child: _buildStatCard(
-                  label: 'profile',
-                  value: '${(_profileStrength(userData) * 100).round()}%',
-                  countValue: (_profileStrength(userData) * 100).round(),
-                  suffix: '%',
-                  color: c.success,
+                child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                  stream: _statsStream,
+                  builder: (context, snap) {
+                    final stats =
+                        (snap.data?.data()?['stats'] as Map?) ?? const {};
+                    final minutes =
+                        ((stats['teachMinutes'] as num?) ?? 0) +
+                        ((stats['learnMinutes'] as num?) ?? 0);
+                    final hours = minutes / 60;
+                    final useHours = minutes >= 60;
+                    final whole = useHours && hours == hours.roundToDouble();
+                    return _buildStatCard(
+                      label: useHours ? 'hours' : 'minutes',
+                      value: useHours
+                          ? hours.toStringAsFixed(whole ? 0 : 1)
+                          : '${minutes.round()}',
+                      countValue: useHours ? hours : minutes.round(),
+                      decimals: useHours && !whole ? 1 : 0,
+                      color: c.success,
+                    );
+                  },
                 ),
               ),
             ],
@@ -421,19 +449,6 @@ class _ProfilePageState extends State<ProfilePage>
         ],
       ),
     );
-  }
-
-  /// Endowed progress: the meter counts what is already there, so finishing
-  /// feels like completing something rather than starting from zero.
-  double _profileStrength(Map<String, dynamic> userData) {
-    final checks = [
-      (userData['photoUrl'] ?? '').toString().isNotEmpty,
-      (userData['bio'] ?? '').toString().trim().isNotEmpty,
-      List<String>.from(userData['skillsOffered'] ?? []).isNotEmpty,
-      List<String>.from(userData['skillsWanted'] ?? []).isNotEmpty,
-      List<String>.from(userData['availability'] ?? []).isNotEmpty,
-    ];
-    return checks.where((v) => v).length / checks.length;
   }
 
   Widget _buildStatCard({
@@ -1754,6 +1769,8 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
     switch (status) {
       case 'completed':
         return Icons.check_circle;
+      case 'awaiting_ratings':
+        return Icons.star_half_rounded;
       case 'accepted':
         return Icons.event_available;
       case 'declined':
@@ -1770,6 +1787,8 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
     switch (status) {
       case 'completed':
         return 'Completed';
+      case 'awaiting_ratings':
+        return 'Waiting for ratings';
       case 'accepted':
         return 'Accepted - upcoming';
       case 'declined':

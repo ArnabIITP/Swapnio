@@ -1,11 +1,13 @@
 /**
- * Swap session timer, time tracking and the badges built on it.
+ * Swap session timer, time tracking, ratings and the badges built on it.
  *
  * A session only counts once both participants have checked in and at least
- * MIN_SESSION_MINUTES have passed, and it becomes `completed` only when BOTH
- * confirm it - there is no automatic confirmation. The one still to confirm
- * is reminded (see remindUnconfirmed); a genuine dispute goes through the
- * report flow to an admin. All of that happens here with admin privileges - the security
+ * MIN_SESSION_MINUTES have passed, BOTH have confirmed it (there is no
+ * automatic confirmation) and BOTH have rated each other for it. Confirming
+ * moves it to `awaiting_ratings`; the second rating (rateSession) makes it
+ * `completed`, which is what every count, badge and the Skill Passport
+ * reads. Anyone still to confirm or rate is reminded; a genuine dispute goes
+ * through the report flow to an admin. All of that happens here with admin privileges - the security
  * rules stop clients from writing `status: 'completed'` or any timing field
  * themselves, which is what makes the time on a Skill Passport "verified".
  *
@@ -17,6 +19,7 @@
  */
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const crypto = require('crypto');
 const admin = require('firebase-admin');
 const streaks = require('./streaks');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
@@ -25,6 +28,12 @@ const MIN_SESSION_MINUTES = 30;
 const MAX_COUNTED_MINUTES = 120;
 const CHECKIN_EARLY_MINUTES = 15;
 const CONFIRM_REMINDERS = [[1, 'confirmReminder1h'], [24, 'confirmReminder24h']];
+// One gentle reminder for a missing rating - no more.
+const RATE_REMINDERS = [[24, 'rateReminder24h']];
+const AWAITING_RATINGS = 'awaiting_ratings';
+const MAX_REVIEW = 1000;
+// Readable session ids for reports: no 0/O or 1/I.
+const CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 // Sessions completed before the timer existed have no recorded length. They
 // were real, agreed sessions, so they count as the minimum a session can now
 // be - never more.
@@ -213,13 +222,31 @@ exports.completeSwapSession = onCall(async (request) => {
       update.endedAt = at;
       update.durationMinutes = Math.min(MAX_COUNTED_MINUTES, Math.floor(elapsed));
     }
-    const completed = participants.every((p) => confirmations[p]);
-    if (completed) Object.assign(update, completionFields(confirmations, at));
+    // Both confirmed: the session now waits for both ratings before it
+    // counts (rateSession completes it).
+    const confirmedByAll = participants.every((p) => confirmations[p]);
+    if (confirmedByAll) {
+      update.status = AWAITING_RATINGS;
+      update.confirmedAt = at;
+    }
     tx.update(ref, update);
-    return { swap, completed, changed: true };
+    return { swap, completed: false, awaitingRatings: confirmedByAll, changed: true };
   });
 
-  if (result.changed && !result.completed) {
+  if (result.changed && result.awaitingRatings) {
+    // The one confirming now gets the rating sheet in the app straight
+    // away; only the person who confirmed earlier needs telling.
+    const first = partnerOf(result.swap, uid);
+    const me = nameOf(result.swap, uid);
+    await notify(
+      first,
+      'session_rate',
+      `${me} confirmed your session too - add your rating to finish it`,
+      uid,
+      me,
+      swapId,
+    );
+  } else if (result.changed && !result.completed) {
     const me = nameOf(result.swap, uid);
     await notify(
       partnerOf(result.swap, uid),
@@ -231,7 +258,7 @@ exports.completeSwapSession = onCall(async (request) => {
     );
   }
   await streaks.recordActivity(uid);
-  return { completed: result.completed };
+  return { completed: result.completed, awaitingRatings: Boolean(result.awaitingRatings) };
 });
 
 /**
@@ -267,6 +294,141 @@ exports.remindUnconfirmed = async () => {
       }
     }
   }
+};
+
+// ---------------------------------------------------------------- ratings
+
+/**
+ * Rates the other person for one session. Ratings are only given here, per
+ * session, once both have confirmed it; the second rating completes the
+ * session so it starts counting. Each person rates a session once.
+ */
+exports.rateSession = onCall(async (request) => {
+  const uid = requireUid(request);
+  const swapId = requireSwapId(request);
+  const d = request.data || {};
+  const rating = Number(d.rating);
+  if (!(rating >= 1 && rating <= 5) || Math.round(rating * 2) !== rating * 2) {
+    throw new HttpsError('invalid-argument', 'Pick a rating from 1 to 5 stars.');
+  }
+  const review = typeof d.review === 'string' ? d.review.trim().slice(0, MAX_REVIEW) : '';
+  const tags = Array.isArray(d.tags)
+    ? d.tags.filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim().slice(0, 40)).slice(0, 8)
+    : [];
+  const ref = db().collection('swaps').doc(swapId);
+  const ratingRef = db().collection('ratings').doc(`${swapId}_${uid}`);
+
+  const result = await db().runTransaction(async (tx) => {
+    const [snap, existing] = await Promise.all([tx.get(ref), tx.get(ratingRef)]);
+    if (!snap.exists) throw new HttpsError('not-found', 'Session not found.');
+    const swap = snap.data();
+    const participants = (swap.participants || []).filter(Boolean);
+    if (!participants.includes(uid)) {
+      throw new HttpsError('permission-denied', 'This is not your session.');
+    }
+    if (swap.status !== AWAITING_RATINGS) {
+      throw new HttpsError(
+        'failed-precondition',
+        swap.status === 'completed'
+          ? 'This session is already finished.'
+          : 'You can rate a session once you have both confirmed it.',
+      );
+    }
+    if (existing.exists) {
+      throw new HttpsError('already-exists', 'You already rated this session.');
+    }
+    const to = partnerOf(swap, uid);
+    const at = now();
+    tx.create(ratingRef, {
+      fromUserId: uid,
+      toUserId: to,
+      swapId,
+      rating,
+      review,
+      tags,
+      timestamp: FieldValue.serverTimestamp(),
+    });
+    const ratedBy = { ...(swap.ratedBy || {}), [uid]: at };
+    const update = { [`ratedBy.${uid}`]: at, updatedAt: FieldValue.serverTimestamp() };
+    const nowComplete = participants.every((p) => ratedBy[p]);
+    if (nowComplete) Object.assign(update, completionFields(swap.completionConfirmations || {}, at));
+    tx.update(ref, update);
+    return { swap, to, completed: nowComplete };
+  });
+
+  return { completed: result.completed };
+});
+
+/** One reminder, a day later, for whoever hasn't rated a confirmed session. */
+exports.remindUnrated = async () => {
+  for (const [hours, flag] of RATE_REMINDERS) {
+    const cutoff = Timestamp.fromMillis(Date.now() - hours * 3600 * 1000);
+    const snap = await db().collection('swaps')
+      .where('status', '==', AWAITING_RATINGS)
+      .where('confirmedAt', '<=', cutoff)
+      .limit(200)
+      .get();
+    for (const doc of snap.docs) {
+      const swap = doc.data();
+      if (swap[flag]) continue;
+      await doc.ref.update({ [flag]: true });
+      const rated = swap.ratedBy || {};
+      for (const p of (swap.participants || []).filter((x) => x && !rated[x])) {
+        const other = partnerOf(swap, p);
+        await notify(
+          p,
+          'session_rate',
+          `How was your session with ${nameOf(swap, other)}? Add your rating to finish it`,
+          other,
+          nameOf(swap, other),
+          doc.id,
+        );
+      }
+    }
+  }
+};
+
+// ------------------------------------------------------------ session ids
+
+function randomCode() {
+  let s = '';
+  for (let i = 0; i < 8; i++) s += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
+  return `SES-${s.slice(0, 4)}-${s.slice(4)}`;
+}
+
+/**
+ * A session id people can read out or paste into a report, e.g.
+ * SES-7K3P-9QXA. Checked against existing sessions so it's unique.
+ */
+async function newSessionCode() {
+  for (let i = 0; i < 6; i++) {
+    const code = randomCode();
+    const clash = await db().collection('swaps').where('sessionCode', '==', code).limit(1).get();
+    if (clash.empty) return code;
+  }
+  return randomCode();
+}
+
+exports.newSessionCode = newSessionCode;
+
+/** Gives sessions created before session ids existed one, a page per run. */
+exports.migrateSessionCodes = async () => {
+  const markerRef = db().collection('meta').doc('sessionCodeMigration');
+  const marker = await markerRef.get();
+  if (marker.exists && marker.get('done') === true) return;
+  let query = db().collection('swaps').orderBy(admin.firestore.FieldPath.documentId()).limit(300);
+  const cursor = marker.exists ? marker.get('lastId') : null;
+  if (cursor) query = query.startAfter(cursor);
+  const snap = await query.get();
+  for (const doc of snap.docs) {
+    if (!doc.get('sessionCode')) await doc.ref.update({ sessionCode: await newSessionCode() });
+  }
+  await markerRef.set(
+    snap.size < 300
+      ? { done: true, finishedAt: FieldValue.serverTimestamp() }
+      : { lastId: snap.docs[snap.docs.length - 1].id },
+    { merge: true },
+  );
 };
 
 // ------------------------------------------------------------------ stats
@@ -436,8 +598,9 @@ async function refreshRating(uid) {
 }
 
 /**
- * A new rating: update the profile average, note it in the chat, feed the
- * five-star badge family and keep the reviewer's daily streak.
+ * A new rating: update the profile average, feed the five-star badge family
+ * and keep the reviewer's daily streak. (Ratings belong to sessions now, so
+ * nothing is posted in the chat.)
  */
 exports.statsOnRating = onDocumentCreated('ratings/{ratingId}', async (event) => {
   const rating = event.data && event.data.data();
@@ -445,21 +608,6 @@ exports.statsOnRating = onDocumentCreated('ratings/{ratingId}', async (event) =>
   await refreshRating(rating.toUserId);
   const from = rating.fromUserId;
   const to = rating.toUserId;
-  if (from && to) {
-    const roomId = from < to ? `${from}_${to}` : `${to}_${from}`;
-    const room = db().collection('chatRooms').doc(roomId);
-    if ((await room.get()).exists) {
-      const fromDoc = await db().collection('users').doc(from).get();
-      const name = (fromDoc.exists && fromDoc.get('name')) || 'Your partner';
-      await room.collection('messages').add({
-        senderId: 'system',
-        type: 'rating',
-        text: `${name} rated this skill exchange ${Number(rating.rating).toFixed(1)} stars`,
-        rating: Number(rating.rating),
-        timestamp: FieldValue.serverTimestamp(),
-      });
-    }
-  }
   await refreshStatsAndBadges(to);
   // Leaving a review keeps the reviewer's daily streak.
   await streaks.recordActivity(from);

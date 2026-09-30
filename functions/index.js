@@ -37,6 +37,7 @@ const privacy = require('./privacy');
 exports.checkInSession = sessions.checkInSession;
 exports.completeSwapSession = sessions.completeSwapSession;
 exports.refreshMyStats = sessions.refreshMyStats;
+exports.rateSession = sessions.rateSession;
 exports.statsOnRating = sessions.statsOnRating;
 
 const skills = require('./skills');
@@ -565,6 +566,8 @@ async function sendSessionReminders(db, {
 exports.sessionReminders = onSchedule('every 15 minutes', async () => {
   const db = admin.firestore();
   await sessions.remindUnconfirmed();
+  await sessions.remindUnrated();
+  await sessions.migrateSessionCodes();
   await streaks.remindStreaks();
   await privacy.migrateUsersBatch();
   await sendSessionReminders(db, {

@@ -40,12 +40,7 @@ class _ChatPageState extends State<ChatPage> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final currentUser = FirebaseAuth.instance.currentUser;
-  bool _showRatingDialog = false;
-  double _rating = 0;
   bool _sendFailed = false;
-  String? _completedSwapId;
-  final TextEditingController _reviewController = TextEditingController();
-  final Set<String> _selectedFeedbackTags = {};
   // Created once, NOT inside build(): calling .snapshots() during build
   // returns a new Stream object each time, so StreamBuilder would tear down
   // and re-subscribe on every rebuild - which is what made the chat flash a
@@ -72,15 +67,6 @@ class _ChatPageState extends State<ChatPage> {
   DocumentReference get _roomRef =>
       FirebaseFirestore.instance.collection('chatRooms').doc(widget.chatRoomId);
 
-  static const List<String> _feedbackTagOptions = [
-    'Punctual',
-    'Clear teacher',
-    'Patient',
-    'Friendly',
-    'Well prepared',
-    'Great listener',
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -100,7 +86,6 @@ class _ChatPageState extends State<ChatPage> {
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _markMessagesAsRead();
-      _loadCompletedSession();
     });
   }
 
@@ -143,15 +128,6 @@ class _ChatPageState extends State<ChatPage> {
     _roomRef.update({'typing.$uid': FieldValue.delete()}).catchError((_) {});
   }
 
-  /// Ratings are only unlocked once a swap session has been completed.
-  Future<void> _loadCompletedSession() async {
-    final swapId = await SwapSessionService.instance.completedSessionWith(
-      widget.otherUserId,
-    );
-    if (!mounted) return;
-    setState(() => _completedSwapId = swapId);
-  }
-
   @override
   void dispose() {
     _clearTyping();
@@ -160,7 +136,6 @@ class _ChatPageState extends State<ChatPage> {
     _messageController.dispose();
     _messageFocusNode.dispose();
     _scrollController.dispose();
-    _reviewController.dispose();
     super.dispose();
   }
 
@@ -239,72 +214,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  Future<void> _submitRating() async {
-    if (_rating == 0) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Please select a rating')));
-      return;
-    }
-
-    try {
-      // Duplicate guard: one rating per rater per completed session.
-      if (_completedSwapId != null) {
-        final existing = await FirebaseFirestore.instance
-            .collection('ratings')
-            .where('fromUserId', isEqualTo: currentUser!.uid)
-            .where('swapId', isEqualTo: _completedSwapId)
-            .limit(1)
-            .get();
-        if (existing.docs.isNotEmpty) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('You already rated this swap session.'),
-            ),
-          );
-          return;
-        }
-      }
-
-      if (_completedSwapId == null) return;
-      // One rating per person per session: the id is <swapId>_<raterUid>
-      // (the rules refuse a second one). The server then updates the
-      // profile average and posts the note in this chat.
-      await FirebaseFirestore.instance
-          .collection('ratings')
-          .doc('${_completedSwapId}_${currentUser!.uid}')
-          .set({
-        'fromUserId': currentUser!.uid,
-        'toUserId': widget.otherUserId,
-        'swapId': _completedSwapId,
-        'rating': _rating,
-        'review': _reviewController.text.trim(),
-        'tags': _selectedFeedbackTags.toList(),
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-
-      // Reset rating dialog state
-      setState(() {
-        _showRatingDialog = false;
-        _rating = 0;
-        _reviewController.clear();
-        _selectedFeedbackTags.clear();
-      });
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Thank you for your rating!')),
-      );
-    } catch (e) {
-      print('Error submitting rating: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to submit rating: $e')));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -347,31 +256,6 @@ class _ChatPageState extends State<ChatPage> {
             icon: Icon(Icons.event_available, color: context.sw.give),
             tooltip: 'Propose swap session',
             onPressed: _showProposeSessionDialog,
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.star_rate,
-              color: _completedSwapId == null ? Colors.grey : context.sw.give,
-            ),
-            tooltip: _completedSwapId == null
-                ? 'Complete a swap session to unlock ratings'
-                : 'Rate this user',
-            onPressed: () {
-              if (_completedSwapId == null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Finish a swap session together first - then you can rate '
-                      'each other.',
-                    ),
-                  ),
-                );
-                return;
-              }
-              setState(() {
-                _showRatingDialog = true;
-              });
-            },
           ),
           PopupMenuButton<String>(
             icon: Icon(
@@ -421,7 +305,6 @@ class _ChatPageState extends State<ChatPage> {
       ),
       body: Column(
         children: [
-          if (_showRatingDialog) _buildRatingDialog(),
           // Messages
           Expanded(
             child: StreamBuilder<DocumentSnapshot>(
@@ -1327,139 +1210,6 @@ class _ChatPageState extends State<ChatPage> {
                 ],
               ),
             ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRatingDialog() {
-    return Container(
-      margin: const EdgeInsets.all(18),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'Rate Your Experience',
-                style: TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w700,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.grey),
-                onPressed: () {
-                  setState(() {
-                    _showRatingDialog = false;
-                  });
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'How was your skill exchange with ${widget.otherUserName}?',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 15,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 18),
-          Center(
-            child: RatingBar.builder(
-              initialRating: _rating,
-              minRating: 1,
-              direction: Axis.horizontal,
-              allowHalfRating: true,
-              itemCount: 5,
-              itemBuilder: (context, _) =>
-                  Icon(Icons.star, color: context.sw.give),
-              onRatingUpdate: (rating) {
-                setState(() {
-                  _rating = rating;
-                });
-              },
-            ),
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: _feedbackTagOptions.map((tag) {
-              final selected = _selectedFeedbackTags.contains(tag);
-              return FilterChip(
-                label: Text(tag, style: const TextStyle(fontSize: 12)),
-                selected: selected,
-                onSelected: (value) {
-                  setState(() {
-                    if (value) {
-                      _selectedFeedbackTags.add(tag);
-                    } else {
-                      _selectedFeedbackTags.remove(tag);
-                    }
-                  });
-                },
-                selectedColor: context.sw.give.withValues(alpha: 0.2),
-                checkmarkColor: context.sw.give,
-                visualDensity: VisualDensity.compact,
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 18),
-          TextField(
-            controller: _reviewController,
-            decoration: InputDecoration(
-              hintText: 'Write a review (optional)',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: context.sw.border),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-            ),
-            maxLines: 3,
-            style: const TextStyle(fontSize: 14),
-          ),
-          const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: context.sw.give,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                textStyle: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 16,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onPressed: _submitRating,
-              child: const Text('Submit Rating'),
-            ),
-          ),
         ],
       ),
     );

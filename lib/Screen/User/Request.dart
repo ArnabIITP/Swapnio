@@ -495,11 +495,7 @@ class _RequestPageState extends State<RequestPage>
         children: [
           if (!started) RescheduleRequestBanner(swapId: swapId, data: data),
           if (rawData != null)
-            SessionTimerPanel(
-              swapId: swapId,
-              data: rawData,
-              onRate: () => _tabController.animateTo(1),
-            ),
+            SessionTimerPanel(swapId: swapId, data: rawData),
           // Once both have checked in the session is happening: it can't be
           // moved or reported as a no-show any more (the rules enforce this);
           // the ✕ on the timer stops it in the first 30 minutes instead.
@@ -540,6 +536,31 @@ class _RequestPageState extends State<RequestPage>
       );
     }
 
+    if (status == SwapSessionService.statusAwaitingRatings) {
+      final rated = ((data['ratedBy'] as Map?) ?? const {}).containsKey(
+        FirebaseAuth.instance.currentUser?.uid,
+      );
+      return Row(
+        children: [
+          Icon(Icons.star_outline_rounded, size: 18, color: context.sw.textMuted),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              rated
+                  ? 'Waiting for ${sessionOtherFirstName(data)}\'s rating'
+                  : 'Add your rating to finish this session',
+              style: TextStyle(fontSize: 13, color: context.sw.textMuted),
+            ),
+          ),
+          if (!rated)
+            FilledButton(
+              onPressed: () => rateSessionFlow(context, swapId, data),
+              child: const Text('Rate'),
+            ),
+        ],
+      );
+    }
+
     if (status == 'completed') {
       return Row(
         children: [
@@ -547,7 +568,7 @@ class _RequestPageState extends State<RequestPage>
           const SizedBox(width: 6),
           Expanded(
             child: Text(
-              'Swap finished - open the chat to leave a rating',
+              'Swap finished and counted for you both',
               style: TextStyle(fontSize: 13, color: context.sw.textMuted),
             ),
           ),
@@ -642,6 +663,10 @@ class _RequestPageState extends State<RequestPage>
       case 'completed':
         statusColor = c.get;
         statusLabel = 'Completed';
+        break;
+      case 'awaiting_ratings':
+        statusColor = c.get;
+        statusLabel = 'Almost done';
         break;
       case 'declined':
         statusColor = c.textMuted;

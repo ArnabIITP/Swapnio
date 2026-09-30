@@ -53,6 +53,7 @@ class SessionChatCard extends StatelessWidget {
               final (label, color) = switch (status) {
                 'accepted' => ('Accepted', c.success),
                 'completed' => ('Completed', c.get),
+                'awaiting_ratings' => ('Waiting for ratings', c.get),
                 'declined' => ('Declined', c.textMuted),
                 'cancelled' => ('Cancelled', c.textMuted),
                 'no_show' => ('No-show', c.textMuted),

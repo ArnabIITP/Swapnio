@@ -39,6 +39,7 @@ const admin = require('firebase-admin');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const calendar = require('./calendar');
 const streaks = require('./streaks');
+const sessions = require('./sessions');
 
 const PLANNED_MINUTES = [30, 45, 60, 90];
 const BUFFER_MINUTES = 10;
@@ -318,6 +319,7 @@ exports.proposeSession = onCall(async (request) => {
   if (warnings.length) return { needsConfirm: true, warnings };
 
   const ref = await db().collection('swaps').add({
+    sessionCode: await sessions.newSessionCode(),
     participants: [uid, otherId],
     participantNames: { [uid]: myName, [otherId]: otherName },
     sessionType: type,

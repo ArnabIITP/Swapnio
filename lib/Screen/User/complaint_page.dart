@@ -7,7 +7,11 @@ import '../../services/complaint_service.dart';
 /// distinct from reporting another user. Admins see these on their own
 /// route with the reporter's contact email attached.
 class ComplaintPage extends StatefulWidget {
-  const ComplaintPage({super.key});
+  /// Set when reporting a specific session (from its detail page).
+  final String sessionCode;
+  final String swapId;
+
+  const ComplaintPage({super.key, this.sessionCode = '', this.swapId = ''});
 
   @override
   State<ComplaintPage> createState() => _ComplaintPageState();
@@ -16,10 +20,22 @@ class ComplaintPage extends StatefulWidget {
 class _ComplaintPageState extends State<ComplaintPage> {
   final _subjectController = TextEditingController();
   final _descriptionController = TextEditingController();
+  late final _sessionController = TextEditingController(
+    text: widget.sessionCode,
+  );
   bool _submitting = false;
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.sessionCode.isNotEmpty) {
+      _subjectController.text = 'Problem with session ${widget.sessionCode}';
+    }
+  }
+
+  @override
   void dispose() {
+    _sessionController.dispose();
     _subjectController.dispose();
     _descriptionController.dispose();
     super.dispose();
@@ -35,9 +51,12 @@ class _ComplaintPageState extends State<ComplaintPage> {
       return;
     }
     setState(() => _submitting = true);
+    final code = _sessionController.text.trim().toUpperCase();
     final ok = await ComplaintService.instance.submitComplaint(
       subject: subject,
       description: description,
+      sessionCode: code,
+      swapId: code == widget.sessionCode ? widget.swapId : '',
     );
     if (!mounted) return;
     setState(() => _submitting = false);
@@ -85,6 +104,15 @@ class _ComplaintPageState extends State<ComplaintPage> {
               decoration: const InputDecoration(
                 labelText: 'Subject',
                 hintText: 'Short summary of the issue',
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _sessionController,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(
+                labelText: 'Session ID (optional)',
+                hintText: 'e.g. SES-7K3P-9QXA - shown on the session page',
               ),
             ),
             const SizedBox(height: 16),
