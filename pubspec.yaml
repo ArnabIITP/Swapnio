@@ -50,6 +50,15 @@ dependencies:
   flutter_svg: ^2.2.0
   cloud_functions: ^4.7.6
   http: ^1.2.2
+  share_plus: ^10.0.0
+  path_provider: ^2.1.4
+  qr: ^3.0.2
+  mobile_scanner: ^6.0.10
+  android_play_install_referrer: ^0.4.0
+  flutter_secure_storage: ^10.3.4
+  device_info_plus: ^10.1.2
+  package_info_plus: ^9.0.1
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
