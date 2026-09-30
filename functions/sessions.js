@@ -412,13 +412,59 @@ exports.refreshMyStats = onCall(async (request) => {
   return { stats };
 });
 
-/** Written reviews feed the five-star badge family. */
+/**
+ * The average rating and count on a profile, recomputed from the ratings
+ * themselves. Only the server writes these - the app used to, which meant
+ * the rules had to let anyone change anyone's rating.
+ */
+async function refreshRating(uid) {
+  if (!uid) return;
+  const snap = await db().collection('ratings').where('toUserId', '==', uid).get();
+  let total = 0;
+  let count = 0;
+  for (const doc of snap.docs) {
+    const r = Number(doc.get('rating'));
+    if (r >= 1 && r <= 5) {
+      total += r;
+      count++;
+    }
+  }
+  await db().collection('users').doc(uid).update({
+    rating: count ? Math.round((total / count) * 100) / 100 : 0,
+    ratingsCount: count,
+  }).catch(() => null);
+}
+
+/**
+ * A new rating: update the profile average, note it in the chat, feed the
+ * five-star badge family and keep the reviewer's daily streak.
+ */
 exports.statsOnRating = onDocumentCreated('ratings/{ratingId}', async (event) => {
   const rating = event.data && event.data.data();
   if (!rating) return;
-  await refreshStatsAndBadges(rating.toUserId);
+  await refreshRating(rating.toUserId);
+  const from = rating.fromUserId;
+  const to = rating.toUserId;
+  if (from && to) {
+    const roomId = from < to ? `${from}_${to}` : `${to}_${from}`;
+    const room = db().collection('chatRooms').doc(roomId);
+    if ((await room.get()).exists) {
+      const fromDoc = await db().collection('users').doc(from).get();
+      const name = (fromDoc.exists && fromDoc.get('name')) || 'Your partner';
+      await room.collection('messages').add({
+        senderId: 'system',
+        type: 'rating',
+        text: `${name} rated this skill exchange ${Number(rating.rating).toFixed(1)} stars`,
+        rating: Number(rating.rating),
+        timestamp: FieldValue.serverTimestamp(),
+      });
+    }
+  }
+  await refreshStatsAndBadges(to);
   // Leaving a review keeps the reviewer's daily streak.
-  await streaks.recordActivity(rating.fromUserId);
+  await streaks.recordActivity(from);
 });
+
+exports.refreshRating = refreshRating;
 
 exports.MIN_SESSION_MINUTES = MIN_SESSION_MINUTES;

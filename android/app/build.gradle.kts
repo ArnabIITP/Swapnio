@@ -63,6 +63,17 @@ android {
                 ?: signingConfigs.getByName("debug")
         }
     }
+
+    // Emit the release APK as swapnio.apk instead of the default app-release.apk
+    // (output dirs still separate debug/release, so no collision).
+    applicationVariants.all {
+        if (name == "release") {
+            outputs.all {
+                (this as com.android.build.gradle.api.ApkVariantOutput).outputFileName =
+                    "swapnio.apk"
+            }
+        }
+    }
 }
 
 dependencies {

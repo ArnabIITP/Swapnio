@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -100,75 +101,24 @@ class _RequestPageState extends State<RequestPage>
     super.dispose();
   }
 
+  /// Accepting goes through the acceptSwapRequest function, which opens the
+  /// chat, posts the "matched" message and notifies the sender - the app
+  /// isn't allowed to create chat rooms or notifications itself.
   Future<void> _acceptRequest(String docId, Map<String, dynamic> data) async {
-    // First create a chat room between the users
-    final chatRoomId = _getChatRoomId(currentUserId, data["fromUserId"]);
-    final myName = FirebaseAuth.instance.currentUser?.displayName ?? "You";
-    final myPhoto = FirebaseAuth.instance.currentUser?.photoURL ?? "";
-
-    // The chat room MUST be committed on its own first: the security rules for
-    // `chatRooms/{id}/messages` reads the room with get(), which sees only the
-    // pre-batch database state. Writing the room + message in one batch made
-    // the message create fail (permission-denied) for brand-new rooms.
-    final chatRoomRef = FirebaseFirestore.instance
-        .collection('chatRooms')
-        .doc(chatRoomId);
-    await chatRoomRef.set({
-      'users': [currentUserId, data["fromUserId"]],
-      'userNames': {
-        currentUserId: myName,
-        data["fromUserId"]: data["fromName"],
-      },
-      'userPhotos': {
-        currentUserId: myPhoto,
-        data["fromUserId"]: data["fromPhoto"],
-      },
-      'lastMessage': "Swap request accepted! You can start chatting now.",
-      'lastMessageTime': FieldValue.serverTimestamp(),
-      'lastMessageSenderId': currentUserId,
-      'unreadCount': {currentUserId: 0, data["fromUserId"]: 1},
-    }, SetOptions(merge: true));
-
-    // Everything else is atomic now that the room exists.
-    final batch = FirebaseFirestore.instance.batch();
-
-    // Initial system message
-    batch.set(chatRoomRef.collection('messages').doc(), {
-      'senderId': 'system',
-      'text': 'Skill swap matched! $myName accepted the swap request.',
-      'timestamp': FieldValue.serverTimestamp(),
-      'type': 'system',
-    });
-
-    // Notification for the other user
-    batch.set(FirebaseFirestore.instance.collection('notifications').doc(), {
-      'userId': data["fromUserId"],
-      'type': 'request_accepted',
-      'message': '$myName accepted your skill swap request!',
-      'timestamp': FieldValue.serverTimestamp(),
-      'read': false,
-      'senderName': myName,
-      'senderPhoto': myPhoto,
-    });
-
-    // Delete the request being accepted, plus the reverse request if the
-    // other user had also liked us first (a mutual match otherwise leaves a
-    // stale, meaningless request sitting in their Requests tab forever).
-    batch.delete(
-      FirebaseFirestore.instance.collection('swipeRequests').doc(docId),
-    );
-    final reverseSnapshot = await FirebaseFirestore.instance
-        .collection('swipeRequests')
-        .where('fromUserId', isEqualTo: currentUserId)
-        .where('toUserId', isEqualTo: data["fromUserId"])
-        .get();
-    for (final doc in reverseSnapshot.docs) {
-      batch.delete(doc.reference);
+    final String chatRoomId;
+    try {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('acceptSwapRequest')
+          .call({'requestId': docId});
+      chatRoomId = (result.data as Map)['chatRoomId'] as String;
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message ?? 'Could not accept this request.')),
+      );
+      return;
     }
 
-    await batch.commit();
-
-    // Navigate to chat
     if (!mounted) return;
     Navigator.push(
       context,
@@ -300,13 +250,6 @@ class _RequestPageState extends State<RequestPage>
     if (d.inHours < 24) return '${d.inHours}h';
     if (d.inDays < 7) return '${d.inDays}d';
     return DateFormat.MMMd().format(ts.toDate());
-  }
-
-  String _getChatRoomId(String userId1, String userId2) {
-    // Create a consistent chat room ID regardless of order
-    return userId1.compareTo(userId2) < 0
-        ? '${userId1}_${userId2}'
-        : '${userId2}_${userId1}';
   }
 
   @override

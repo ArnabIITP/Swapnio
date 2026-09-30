@@ -91,9 +91,15 @@ class NotificationService {
 
   Future<void> _storeToken(String userId, String token) async {
     try {
-      await _firestore.collection('users').doc(userId).update({
-        'fcmTokens': FieldValue.arrayUnion([token]),
-      });
+      // Kept in the owner-only settings doc, not on the public profile.
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('settings')
+          .doc('push')
+          .set({
+            'tokens': FieldValue.arrayUnion([token]),
+          }, SetOptions(merge: true));
     } catch (e) {
       debugPrint('NotificationService._storeToken failed: $e');
     }

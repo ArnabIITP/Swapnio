@@ -28,7 +28,7 @@ import '../features/analytics/analytics_provider.dart';
 /// deliberately does NOT transition through `completed` - it must never
 /// award points or unlock a rating for a session that didn't happen.
 /// A user's session attendance record, used to decide whether they may book
-/// further sessions (see `isReliableEnough()` in firestore.rules).
+/// further sessions (enforced by proposeSession in functions/schedule.js).
 class ReliabilityStatus {
   final int attended;
   final int noShows;
@@ -60,7 +60,7 @@ class SwapSessionService {
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
   /// Whether the current user is still allowed to book sessions, mirroring
-  /// the `isReliableEnough()` rule in firestore.rules. The rule is the real
+  /// the check in proposeSession (functions/schedule.js). The server is the real
   /// gate - this exists so the UI can explain *why* rather than surfacing a
   /// raw permission-denied error.
   Future<ReliabilityStatus> myReliability() async {

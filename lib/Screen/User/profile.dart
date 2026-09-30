@@ -917,6 +917,7 @@ class _SkillsTabViewState extends State<_SkillsTabView> {
     try {
       final result = await FirebaseFirestore.instance
           .collection('users')
+          .where('discoverable', isEqualTo: true)
           .where(
             isOffered ? 'skillsWanted' : 'skillsOffered',
             arrayContains: skill,
@@ -1840,6 +1841,7 @@ class _AchievementsTabViewState extends State<_AchievementsTabView> {
         return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
           future: FirebaseFirestore.instance
               .collection('users')
+              .where('discoverable', isEqualTo: true)
               .where(FieldPath.documentId, whereIn: uids)
               .get(),
           builder: (context, usersSnap) {

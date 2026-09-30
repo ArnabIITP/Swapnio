@@ -24,6 +24,26 @@ class _AdminPageState extends State<AdminPage>
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   late TabController _tabController;
   bool _isLoading = true;
+
+  /// Sign-in emails by uid, from the adminUserEmails function - profiles no
+  /// longer store them (other members can read profiles).
+  Map<String, String> _emails = const {};
+
+  Future<void> _loadEmails() async {
+    try {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('adminUserEmails')
+          .call();
+      final map = Map<String, dynamic>.from(
+        (result.data as Map)['emails'] as Map? ?? const {},
+      );
+      if (mounted) {
+        setState(() => _emails = map.map((k, v) => MapEntry(k, '$v')));
+      }
+    } catch (e) {
+      debugPrint('Admin emails: $e');
+    }
+  }
   Map<String, dynamic> _stats = {};
   List<DocumentSnapshot> _allUsers = [];
   List<Map<String, dynamic>> _adminSkills = [];
@@ -89,6 +109,7 @@ class _AdminPageState extends State<AdminPage>
   Future<void> _fetchAllUsers() async {
     setState(() => _isLoading = true);
     _setupRealtimeUpdates();
+    _loadEmails();
   }
 
   Future<void> _fetchAdminStats() async {
@@ -198,7 +219,7 @@ class _AdminPageState extends State<AdminPage>
     return _allUsers.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
       final name = (data['name'] ?? '').toString().toLowerCase();
-      final email = (data['email'] ?? '').toString().toLowerCase();
+      final email = (_emails[doc.id] ?? '').toLowerCase();
       final skills =
           (data['skillsOffered'] as List?)?.join(" ").toLowerCase() ?? '';
       final query = _searchQuery.toLowerCase();
@@ -541,7 +562,7 @@ class _AdminPageState extends State<AdminPage>
         final data = user.data() as Map<String, dynamic>;
         final uid = user.id;
         final name = data['name'] ?? 'Unnamed';
-        final email = data['email'] ?? 'No email';
+        final email = _emails[uid] ?? 'No email';
         final skills = (data['skillsOffered'] as List?)?.join(", ") ?? 'None';
         final photoUrl = data['photoUrl'] as String?;
         // Firestore returns whole-number ratings (e.g. 0, 5) as int, not

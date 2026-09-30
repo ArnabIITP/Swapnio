@@ -67,6 +67,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
+          .where('discoverable', isEqualTo: true)
           .limit(100)
           .get();
       if (!mounted) return;

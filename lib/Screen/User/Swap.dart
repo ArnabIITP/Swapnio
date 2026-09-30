@@ -152,9 +152,10 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
       // array-contains-any takes at most 30 values.
       final users = firestore.collection('users');
       final queries = <Future<QuerySnapshot>>[
-        if (explore) users.limit(120).get(),
+        if (explore) users.where('discoverable', isEqualTo: true).limit(120).get(),
         if (!explore && mySkillsWanted.isNotEmpty)
           users
+              .where('discoverable', isEqualTo: true)
               .where(
                 'skillsOffered',
                 arrayContainsAny: mySkillsWanted.take(30).toList(),
@@ -163,6 +164,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
               .get(),
         if (!explore && mySkillsOffered.isNotEmpty)
           users
+              .where('discoverable', isEqualTo: true)
               .where(
                 'skillsWanted',
                 arrayContainsAny: mySkillsOffered.take(30).toList(),
@@ -318,17 +320,7 @@ class _SwapState extends State<Swap> with SingleTickerProviderStateMixin {
         'availability': currentUserData['availability'] ?? [],
         'timestamp': FieldValue.serverTimestamp(),
       });
-      await FirebaseFirestore.instance.collection('notifications').add({
-        'userId': toUser["id"],
-        'type': 'swap_request',
-        'message':
-            '${currentUserData['name'] ?? "Someone"} wants to swap skills with you',
-        'timestamp': FieldValue.serverTimestamp(),
-        'read': false,
-        'senderId': currentUser.uid,
-        'senderName': currentUserData['name'] ?? "Anonymous",
-        'senderPhoto': currentUserData['photoUrl'] ?? "",
-      });
+      // The recipient is notified by the server (functions/requests.js).
     } catch (e) {
       _likeRequestSentIds.remove(toUserId); // allow retry after a failure
       print("Error sending request (background): $e");

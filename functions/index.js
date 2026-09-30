@@ -31,6 +31,8 @@ setGlobalOptions({ maxInstances: 3, cpu: 'gcf_gen1' });
 
 const sessions = require('./sessions');
 const streaks = require('./streaks');
+const requests = require('./requests');
+const privacy = require('./privacy');
 
 exports.checkInSession = sessions.checkInSession;
 exports.completeSwapSession = sessions.completeSwapSession;
@@ -88,6 +90,10 @@ const web = require('./web');
 
 exports.mySwapWeb = web.mySwapWeb;
 
+exports.acceptSwapRequest = requests.acceptSwapRequest;
+exports.syncUserPrivacy = privacy.syncUserPrivacy;
+exports.adminUserEmails = privacy.adminUserEmails;
+
 exports.pushOnNotification = onDocumentCreated(
   'notifications/{notificationId}',
   async (event) => {
@@ -98,16 +104,23 @@ exports.pushOnNotification = onDocumentCreated(
     const userId = notification.userId;
     if (!userId) return;
 
-    const userDoc = await admin.firestore().collection('users').doc(userId).get();
-    const tokens = (userDoc.get('fcmTokens') || []).filter(Boolean);
+    const tokens = await privacy.pushTokensOf(userId);
     if (tokens.length === 0) return;
+
+    // Only the server writes notifications now, but the title still comes
+    // from the sender's real profile rather than the stored senderName.
+    let title = 'Swapnio';
+    const sender = notification.senderId;
+    if (sender && sender !== 'system') {
+      const senderDoc = await admin.firestore().collection('users').doc(sender).get();
+      const name = senderDoc.exists && senderDoc.get('name');
+      if (name) title = `${name} - Swapnio`;
+    }
 
     const payload = {
       tokens,
       notification: {
-        title: notification.senderName
-          ? `${notification.senderName} - Swapnio`
-          : 'Swapnio',
+        title,
         body: notification.message || 'You have a new update',
       },
       data: {
@@ -140,15 +153,7 @@ exports.pushOnNotification = onDocumentCreated(
       }
     });
 
-    if (staleTokens.length > 0) {
-      await admin
-        .firestore()
-        .collection('users')
-        .doc(userId)
-        .update({
-          fcmTokens: FieldValue.arrayRemove(...staleTokens),
-        });
-    }
+    await privacy.removePushTokens(userId, staleTokens);
   },
 );
 
@@ -381,13 +386,14 @@ exports.badgeOnFirstMessage = onDocumentCreated(
   },
 );
 
-/** Sending a swap request keeps the sender's daily streak. */
+/**
+ * A new swap request: sender details fixed from their profile, recipient
+ * notified, sender's streak kept (functions/requests.js). The export keeps
+ * its original name so the deployed function is updated in place.
+ */
 exports.streakOnRequest = onDocumentCreated(
   'swipeRequests/{requestId}',
-  async (event) => {
-    const request = event.data && event.data.data();
-    if (request) await streaks.recordActivity(request.fromUserId);
-  },
+  requests.onRequestCreated,
 );
 
 /**
@@ -448,8 +454,10 @@ exports.trackSessionReliability = onDocumentUpdated(
     if (after.status === 'completed') {
       await Promise.all(
         participants.map((uid) =>
+          // completedSwaps is the count shown on profiles and Discover
+          // cards; only the server may write it.
           db.collection('users').doc(uid).set(
-            { sessionsAttended: increment },
+            { sessionsAttended: increment, completedSwaps: increment },
             { merge: true },
           ),
         ),
@@ -558,6 +566,7 @@ exports.sessionReminders = onSchedule('every 15 minutes', async () => {
   const db = admin.firestore();
   await sessions.remindUnconfirmed();
   await streaks.remindStreaks();
+  await privacy.migrateUsersBatch();
   await sendSessionReminders(db, {
     offsetMinutes: 60,
     windowMinutes: 20,

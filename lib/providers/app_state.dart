@@ -157,7 +157,12 @@ class AppState extends ChangeNotifier {
       final doc = await _firestore.collection('users').doc(userId).get();
 
       if (doc.exists) {
-        _currentUser = UserModel.fromMap(doc.data()!, userId);
+        // The email isn't stored on the profile (other members can read
+        // it); it comes from Firebase Auth.
+        _currentUser = UserModel.fromMap(
+          doc.data()!,
+          userId,
+        ).copyWith(email: _auth.currentUser?.email ?? '');
       } else {
         // Create a basic user record if it doesn't exist
         final User? authUser = _auth.currentUser;
@@ -555,16 +560,7 @@ class AppState extends ChangeNotifier {
       AnalyticsProvider.log('swap_request_sent', _currentUser!.id, {
         'toUserId': requestData['toUserId'],
       });
-      // Add notification for recipient
-      await _firestore.collection('notifications').add({
-        'userId': requestData['toUserId'],
-        'type': 'swap_request',
-        'message': '${_currentUser!.name} wants to swap skills with you',
-        'timestamp': FieldValue.serverTimestamp(),
-        'read': false,
-        'senderName': _currentUser!.name,
-        'senderPhoto': _currentUser!.photoUrl,
-      });
+      // The recipient is notified by the server (functions/requests.js).
 
       return true;
     } catch (e) {

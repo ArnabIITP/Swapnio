@@ -69,7 +69,8 @@ class UserModel {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'email': email,
+      // No 'email': other members can read profiles, so it stays in
+      // Firebase Auth only.
       'name': name,
       'bio': bio,
       'photoUrl': photoUrl,

@@ -267,8 +267,14 @@ class _ChatPageState extends State<ChatPage> {
         }
       }
 
-      // Add rating document
-      await FirebaseFirestore.instance.collection('ratings').add({
+      if (_completedSwapId == null) return;
+      // One rating per person per session: the id is <swapId>_<raterUid>
+      // (the rules refuse a second one). The server then updates the
+      // profile average and posts the note in this chat.
+      await FirebaseFirestore.instance
+          .collection('ratings')
+          .doc('${_completedSwapId}_${currentUser!.uid}')
+          .set({
         'fromUserId': currentUser!.uid,
         'toUserId': widget.otherUserId,
         'swapId': _completedSwapId,
@@ -277,41 +283,6 @@ class _ChatPageState extends State<ChatPage> {
         'tags': _selectedFeedbackTags.toList(),
         'timestamp': FieldValue.serverTimestamp(),
       });
-
-      // Recompute the average from the actual rating count (NOT completedSwaps,
-      // which counts swaps, not ratings - both participants rate separately).
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.otherUserId)
-          .get();
-
-      if (userDoc.exists) {
-        final userData = userDoc.data()!;
-        final currentRating = (userData['rating'] as num?)?.toDouble() ?? 0.0;
-        final ratingsCount = (userData['ratingsCount'] as num?)?.toInt() ?? 0;
-
-        final newRating =
-            ((currentRating * ratingsCount) + _rating) / (ratingsCount + 1);
-
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(widget.otherUserId)
-            .update({'rating': newRating, 'ratingsCount': ratingsCount + 1});
-      }
-
-      // Add system message about the rating
-      await FirebaseFirestore.instance
-          .collection('chatRooms')
-          .doc(widget.chatRoomId)
-          .collection('messages')
-          .add({
-            'senderId': 'system',
-            'text':
-                '${currentUser!.displayName} rated this skill exchange ${_rating.toStringAsFixed(1)} stars',
-            'timestamp': FieldValue.serverTimestamp(),
-            'type': 'rating',
-            'rating': _rating,
-          });
 
       // Reset rating dialog state
       setState(() {

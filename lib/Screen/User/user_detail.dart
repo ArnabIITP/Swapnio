@@ -220,17 +220,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
         'timestamp': FieldValue.serverTimestamp(),
       });
 
-      // Add notification
-      await FirebaseFirestore.instance.collection('notifications').add({
-        'userId': widget.userId,
-        'type': 'swap_request',
-        'message':
-            '${currentUser.displayName ?? "Someone"} wants to swap skills with you',
-        'timestamp': FieldValue.serverTimestamp(),
-        'read': false,
-        'senderName': currentUser.displayName ?? "Anonymous",
-        'senderPhoto': currentUser.photoURL ?? "",
-      });
+      // The recipient is notified by the server (functions/requests.js).
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -63,7 +63,24 @@ service cloud.firestore {
               // syncVerification function.
               'verified', 'emailVerified', 'phoneVerified', 'verifiedAt',
               // Google Calendar connection - set by functions/calendar.js.
-              'calendarConnected'];
+              'calendarConnected',
+              // Mirrors profile visibility; set by functions/privacy.js.
+              'discoverable'];
+    }
+
+    // Never stored on the public profile (functions/privacy.js): the email
+    // lives only in Firebase Auth, push tokens in users/{uid}/settings/push.
+    function privateUserFields() {
+      return ['email', 'fcmTokens'];
+    }
+
+    // Same chat-room id the app and server use: both uids, sorted.
+    function pairId(a, b) {
+      return a < b ? a + '_' + b : b + '_' + a;
+    }
+
+    function matchedWith(userId) {
+      return exists(/databases/$(database)/documents/chatRooms/$(pairId(uid(), userId)));
     }
 
     // The `update` guard above doesn't cover `create` - a brand-new account's
@@ -81,19 +98,7 @@ service cloud.firestore {
         && (!('noShowCount' in data) || data.noShowCount == 0)
         && !data.keys().hasAny(['passportNumber', 'referredBy', 'referredAt', 'boostUntil',
                                 'verified', 'emailVerified', 'phoneVerified', 'verifiedAt',
-                                'calendarConnected']);
-    }
-
-    // No-show enforcement: someone who repeatedly fails to turn up loses the
-    // ability to book more sessions until their record recovers. New accounts
-    // (fewer than 3 resolved sessions) always pass, so a single early no-show
-    // can't lock anyone out. Recovery is automatic - attending sessions pulls
-    // the ratio back above the line.
-    function isReliableEnough() {
-      let profile = userDoc(uid());
-      let attended = profile.get('sessionsAttended', 0);
-      let noShows = profile.get('noShowCount', 0);
-      return (attended + noShows) < 3 || attended * 2 >= (attended + noShows);
+                                'calendarConnected', 'discoverable', 'email', 'fcmTokens']);
     }
 
     // ------------------------------------------------------------------ users
@@ -103,22 +108,32 @@ service cloud.firestore {
       // read. ('matches'-only visibility still needs a client/UI-level check
       // today; enforcing it here would require a cross-collection read on
       // every Discover-feed document and hasn't been done yet.)
-      allow read: if isSignedIn() && (
+      // Opening one profile honours its visibility: public for everyone,
+      // 'matches' for people you have a chat with, 'private' for no one.
+      allow get: if isSignedIn() && (
         isSelf(userId)
         || isAdmin()
-        || resource.data.get('privacy', {}).get('profileVisibility', 'public') != 'private');
+        || resource.data.get('privacy', {}).get('profileVisibility', 'public') == 'public'
+        || (resource.data.get('privacy', {}).get('profileVisibility', 'public') == 'matches'
+            && matchedWith(userId)));
+      // Listing (Discover, search, leaderboards) only ever returns profiles
+      // marked discoverable, so a non-public profile can't be pulled in
+      // bulk. Queries must filter on discoverable == true.
+      allow list: if isSignedIn() && (isAdmin() || resource.data.discoverable == true);
       allow create: if isSelf(userId) && createsWithSafeUserDefaults();
       // The owner may edit their own profile fields, but not the
       // trust/reputation fields in protectedUserFields() - those are
       // admin/Cloud-Function-only. Other users may only touch the aggregate
       // reputation fields written by the rating flow (ratingsCount counts
       // received ratings; completedSwaps counts finished sessions).
-      allow update: if (isSelf(userId) && changedNoneOf(protectedUserFields()))
-        // Only an OTHER signed-in user (the rater, via the rating flow) may
-        // touch these aggregate fields - without the !isSelf() check here,
-        // this branch let the owner bypass protectedUserFields() entirely
-        // and self-write rating/ratingsCount/completedSwaps directly.
-        || (isSignedIn() && !isSelf(userId) && changedKeysOnly(['rating', 'ratingsCount', 'completedSwaps', 'lastUpdated']))
+      // Only the owner edits a profile, and never the protected fields.
+      // Rating, ratingsCount and completedSwaps are maintained by Cloud
+      // Functions from the ratings and sessions themselves - other users
+      // used to be allowed to write them, which let anyone set anyone's
+      // rating. Private fields may be removed but never added or changed.
+      allow update: if (isSelf(userId)
+          && changedNoneOf(protectedUserFields())
+          && changedNoneOf(privateUserFields()))
         || isAdmin();
       allow delete: if isSelf(userId) || isAdmin();
 
@@ -147,8 +162,14 @@ service cloud.firestore {
         resource.data.fromUserId == uid()
         || resource.data.toUserId == uid()
         || isAdmin());
-      allow create: if isSignedIn() && request.resource.data.fromUserId == uid();
-      allow update: if isSignedIn() && resource.data.toUserId == uid();
+      allow create: if isSignedIn()
+        && request.resource.data.fromUserId == uid()
+        && request.resource.data.toUserId is string
+        && request.resource.data.toUserId != uid();
+      // The recipient may mark it (e.g. seen) but not re-address it.
+      allow update: if isSignedIn() && resource.data.toUserId == uid()
+        && request.resource.data.fromUserId == resource.data.fromUserId
+        && request.resource.data.toUserId == resource.data.toUserId;
       allow delete: if isSignedIn() && (
         resource.data.fromUserId == uid() || resource.data.toUserId == uid());
     }
@@ -161,20 +182,32 @@ service cloud.firestore {
 
     // ---------------------------------------------------------- notifications
     match /notifications/{notificationId} {
-      allow read, update, delete: if isSignedIn() && resource.data.userId == uid();
-      // Any signed-in user may notify another user (request / accepted /
-      // rating), but if a senderId is included it must be the caller's own -
-      // otherwise anyone could spoof `senderName`/`senderId` to impersonate
-      // another user (or "Swapnio Support") in a push notification.
-      allow create: if isSignedIn() && request.resource.data.userId is string
-        && (!('senderId' in request.resource.data) || request.resource.data.senderId == uid());
+      // The owner reads, marks read and deletes their own. Only Cloud
+      // Functions create notifications (requests, accepts, sessions,
+      // ratings, security) - app-written ones could impersonate anyone,
+      // including "Swapnio Support", in a push notification.
+      allow read, delete: if isSignedIn() && resource.data.userId == uid();
+      allow update: if isSignedIn() && resource.data.userId == uid()
+        && changedKeysOnly(['read']);
+      allow create: if false;
     }
 
     // ------------------------------------------------------ chat rooms & chat
     match /chatRooms/{roomId} {
       allow read: if isSignedIn() && uid() in resource.data.users;
-      allow create: if isSignedIn() && uid() in request.resource.data.users;
-      allow update: if isSignedIn() && uid() in resource.data.users;
+      // Rooms are opened only by the acceptSwapRequest function, after a
+      // request was accepted - never directly, which is what stopped
+      // strangers messaging people without a match.
+      allow create: if false;
+      // Participants update the room (last message, unread counts, typing,
+      // unmatch) but can't change who is in it.
+      allow update: if isSignedIn() && uid() in resource.data.users
+        && changedNoneOf(['users', 'userNames', 'userPhotos'])
+        // Any change to the last-message preview must be credited to you,
+        // so it can't be made to look like the other person wrote it.
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['lastMessage', 'lastMessageSenderId', 'lastMessageTime'])
+            || request.resource.data.lastMessageSenderId == uid());
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
@@ -182,7 +215,9 @@ service cloud.firestore {
           && uid() in get(/databases/$(database)/documents/chatRooms/$(roomId)).data.users;
         allow create: if isSignedIn()
           && uid() in get(/databases/$(database)/documents/chatRooms/$(roomId)).data.users
-          && request.resource.data.senderId in [uid(), 'system'];
+          && request.resource.data.senderId == uid()
+          // 'system' notices and session cards come from the server only.
+          && !(request.resource.data.get('type', 'text') in ['system', 'session', 'rating']);
         // Participants may react to messages, but only touch the reactions
         // map - the text, sender and timestamp stay immutable.
         allow update: if isAdmin() || (isSignedIn()
@@ -196,12 +231,19 @@ service cloud.firestore {
     // A rating is only accepted for a *completed* swap the rater took part in.
     match /ratings/{ratingId} {
       allow read: if isSignedIn();
+      // The id is <swapId>_<raterUid>, so each person rates a session once
+      // (a second create is an overwrite, which isn't allowed), and only the
+      // other person in that completed session can be rated.
       allow create: if isSignedIn()
         && request.resource.data.fromUserId == uid()
         && request.resource.data.toUserId != uid()
         && request.resource.data.swapId is string
+        && ratingId == request.resource.data.swapId + '_' + uid()
+        && request.resource.data.rating is number
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
         && exists(/databases/$(database)/documents/swaps/$(request.resource.data.swapId))
         && uid() in get(/databases/$(database)/documents/swaps/$(request.resource.data.swapId)).data.participants
+        && request.resource.data.toUserId in get(/databases/$(database)/documents/swaps/$(request.resource.data.swapId)).data.participants
         && get(/databases/$(database)/documents/swaps/$(request.resource.data.swapId)).data.status == 'completed';
       allow update, delete: if isAdmin();
     }
@@ -228,12 +270,6 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['status', 'noShowReportedBy', 'updatedAt']);
       allow delete: if isAdmin();
-    }
-
-    function sessionTimingFields() {
-      return ['checkIns', 'startedAt', 'endedAt', 'durationMinutes',
-              'completionConfirmations', 'completedAt', 'goalAchieved',
-              'sessionNotesBy'];
     }
 
     // -------------------------------------------------- curated skills (admin)
@@ -300,13 +336,14 @@ service cloud.firestore {
     match /forum_posts/{postId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.authorId == uid();
-      allow update: if isSignedIn() && resource.data.authorId == uid();
+      allow update: if isSignedIn() && resource.data.authorId == uid()
+        && request.resource.data.authorId == resource.data.authorId;
       allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == uid());
     }
 
     // ------------------------------------------------- analytics / activity
     match /analytics/{eventId} {
-      allow create: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == uid();
       allow read: if isAdmin();
     }
 
@@ -317,7 +354,10 @@ service cloud.firestore {
 
     // ------------------------------------------------ trust & safety: blocks
     match /blocks/{blockId} {
-      allow read: if isSignedIn();
+      // Only the blocker and the blocked person can see a block (the app
+      // hides people in both directions); nobody else can.
+      allow read: if isSignedIn()
+        && (resource.data.userId == uid() || resource.data.blockedUserId == uid() || isAdmin());
       allow create: if isSignedIn() && request.resource.data.userId == uid();
       allow delete: if isSignedIn() && resource.data.userId == uid();
     }
