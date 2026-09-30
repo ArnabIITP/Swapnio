@@ -11,15 +11,23 @@ class SkillSuggestionChips extends StatelessWidget {
   final String query;
   final ValueChanged<String> onSelected;
 
+  /// Skills already on the profile, left out of the suggestions.
+  final List<String> exclude;
+
   const SkillSuggestionChips({
     super.key,
     required this.query,
     required this.onSelected,
+    this.exclude = const [],
   });
 
   @override
   Widget build(BuildContext context) {
-    final suggestions = SkillCatalogService.instance.suggestionsFor(query);
+    final taken = exclude.map((e) => e.toLowerCase()).toSet();
+    final suggestions = SkillCatalogService.instance
+        .suggestionsFor(query)
+        .where((s) => !taken.contains(s.toLowerCase()))
+        .toList();
     if (suggestions.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 8, bottom: 4),
@@ -27,13 +35,15 @@ class SkillSuggestionChips extends StatelessWidget {
         spacing: 6,
         runSpacing: 6,
         children: suggestions
-            .map((s) => ActionChip(
-                  label: Text(s, style: const TextStyle(fontSize: 12)),
-                  onPressed: () => onSelected(s),
-                  backgroundColor: context.sw.give.withValues(alpha: 0.08),
-                  side: BorderSide(color: context.sw.give.withValues(alpha: 0.3)),
-                  visualDensity: VisualDensity.compact,
-                ))
+            .map(
+              (s) => ActionChip(
+                label: Text(s, style: const TextStyle(fontSize: 12)),
+                onPressed: () => onSelected(s),
+                backgroundColor: context.sw.give.withValues(alpha: 0.08),
+                side: BorderSide(color: context.sw.give.withValues(alpha: 0.3)),
+                visualDensity: VisualDensity.compact,
+              ),
+            )
             .toList(),
       ),
     );

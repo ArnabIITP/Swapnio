@@ -1,148 +1,157 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 
-/// Skill-name suggestions and canonicalization, so that "python", "Python"
-/// and "python3" don't end up as three different strings that MatchService's
-/// exact (if case-insensitive) comparison then fails to line up across users.
+/// The curated skill list. Profiles may only list skills from it, so that
+/// "ML", "machine learning" and "Machine Learning" are one skill everywhere -
+/// matching, search and the per-skill hours on the Skill Passport all depend
+/// on that.
 ///
-/// Three sources are merged:
-///  - the admin-curated `skills` collection (Admin > Skills tab) - the
-///    authoritative source when populated, shown first in suggestions.
-///  - each curated skill's optional `aliases` list (e.g. "JavaScript" with
-///    aliases ["JS", "ECMAScript"]) - true synonym mapping, not just
-///    case/whitespace drift: typing an alias resolves to the canonical name.
-///  - skill strings already used across real user profiles - since the
-///    curated list may be sparse or empty for a small/new deployment, this
-///    bootstraps useful suggestions/canonical casing from day one without
-///    requiring an admin to pre-seed anything.
+/// The list lives in the `skills` collection (name, category, aliases),
+/// seeded from functions/skill_catalog.json by the syncSkillCatalog Cloud
+/// Function and extended by admins approving skill requests. A skill that
+/// isn't listed can be requested with [requestSkill]; the server also
+/// rewrites anything off-list on profile writes, so this class is the
+/// friendly front door, not the enforcement.
 class SkillCatalogService {
   SkillCatalogService._();
 
   static final SkillCatalogService instance = SkillCatalogService._();
 
+  /// The catalog version this build expects; bump together with
+  /// `version` in functions/skill_catalog.json.
+  static const int expectedVersion = 1;
+
   final List<String> _curated = [];
-  // lowercase alias -> canonical curated name.
-  final Map<String, String> _aliasToCanonical = {};
-  // lowercase -> {display casing -> usage count}, so the most common casing
-  // used by real profiles wins when canonicalizing.
-  final Map<String, Map<String, int>> _usageCasing = {};
+  final Map<String, List<String>> _byCategory = {};
+  // lowercase name or alias -> canonical name.
+  final Map<String, String> _lookup = {};
   bool _loaded = false;
-  bool _loading = false;
+  Future<void>? _loading;
 
   List<String> get curated => List.unmodifiable(_curated);
 
-  Future<void> ensureLoaded() async {
-    if (_loaded || _loading) return;
-    _loading = true;
+  /// Every catalog skill.
+  List<String> get allKnown => curated;
+
+  /// Category name -> skills, in catalog order.
+  Map<String, List<String>> get categories => Map.unmodifiable(_byCategory);
+
+  Future<void> ensureLoaded() {
+    if (_loaded) return Future.value();
+    return _loading ??= _load().whenComplete(() => _loading = null);
+  }
+
+  Future<void> _load() async {
     try {
-      final results = await Future.wait([
-        FirebaseFirestore.instance
-            .collection('skills')
-            .orderBy('name')
-            .limit(500)
-            .get(),
-        FirebaseFirestore.instance.collection('users').limit(200).get(),
-      ]);
-
-      final skillsSnapshot = results[0] as QuerySnapshot<Map<String, dynamic>>;
-      for (final doc in skillsSnapshot.docs) {
-        final data = doc.data();
-        final name = (data['name'] as String?)?.trim() ?? '';
-        if (name.isEmpty) continue;
-        if (!_curated.contains(name)) _curated.add(name);
-
-        final aliases = data['aliases'];
-        if (aliases is List) {
-          for (final raw in aliases) {
-            final alias = raw.toString().trim();
-            if (alias.isEmpty) continue;
-            _aliasToCanonical[alias.toLowerCase()] = name;
-          }
-        }
+      await _read();
+      final meta = await FirebaseFirestore.instance
+          .collection('meta')
+          .doc('skillCatalog')
+          .get();
+      final version = (meta.data()?['version'] as num?)?.toInt() ?? 0;
+      if (_curated.isEmpty || version < expectedVersion) {
+        // First run after a deploy: have the server seed / upgrade the
+        // catalog, then read it again.
+        await FirebaseFunctions.instance
+            .httpsCallable('syncSkillCatalog')
+            .call();
+        await _read();
       }
+      _loaded = _curated.isNotEmpty;
+    } catch (e) {
+      debugPrint('SkillCatalogService load failed: $e');
+    }
+  }
 
-      final usersSnapshot = results[1] as QuerySnapshot<Map<String, dynamic>>;
-      for (final doc in usersSnapshot.docs) {
-        final data = doc.data();
-        for (final field in ['skillsOffered', 'skillsWanted']) {
-          final list = data[field];
-          if (list is! List) continue;
-          for (final raw in list) {
-            final name = raw.toString().trim();
-            if (name.isEmpty) continue;
-            final key = name.toLowerCase();
-            final casings = _usageCasing.putIfAbsent(key, () => {});
-            casings[name] = (casings[name] ?? 0) + 1;
-          }
-        }
+  Future<void> _read() async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('skills')
+        .get();
+    final docs = snapshot.docs.map((d) => d.data()).toList()
+      ..sort(
+        (a, b) => ((a['order'] as num?) ?? 1e9).compareTo(
+          (b['order'] as num?) ?? 1e9,
+        ),
+      );
+    _curated.clear();
+    _byCategory.clear();
+    _lookup.clear();
+    for (final data in docs) {
+      final name = (data['name'] as String?)?.trim() ?? '';
+      if (name.isEmpty || _lookup.containsKey(name.toLowerCase())) continue;
+      _curated.add(name);
+      _lookup[name.toLowerCase()] = name;
+      final category = (data['category'] as String?)?.trim();
+      _byCategory
+          .putIfAbsent(
+            category == null || category.isEmpty ? 'Other' : category,
+            () => [],
+          )
+          .add(name);
+      for (final alias in List<String>.from(data['aliases'] ?? const [])) {
+        _lookup.putIfAbsent(alias.trim().toLowerCase(), () => name);
       }
-    } catch (_) {
-      // Best-effort: an empty catalog just means no suggestions, free text
-      // still works everywhere this is used.
     }
-    _loaded = true;
-    _loading = false;
   }
 
-  /// Every known skill name (curated first), deduped case-insensitively.
-  List<String> get allKnown => _allKnown;
-
-  List<String> get _allKnown {
-    final seenLower = <String>{};
-    final result = <String>[];
-    for (final name in _curated) {
-      if (seenLower.add(name.toLowerCase())) result.add(name);
-    }
-    for (final key in _usageCasing.keys) {
-      if (seenLower.add(key)) result.add(_mostCommonCasing(key) ?? key);
-    }
-    return result;
+  /// The catalog name for [input] (by name or alias, any casing), or null
+  /// when it isn't in the catalog.
+  String? resolve(String input) {
+    final key = input.trim().toLowerCase();
+    if (key.isEmpty) return null;
+    return _lookup[key];
   }
 
-  String? _mostCommonCasing(String lowerKey) {
-    final casings = _usageCasing[lowerKey];
-    if (casings == null || casings.isEmpty) return null;
-    return casings.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
-  }
+  /// The catalog name when there is one, otherwise the trimmed input.
+  String canonicalize(String input) => resolve(input) ?? input.trim();
 
-  /// Up to 6 suggestions for the given (possibly partial) query. An alias
-  /// match (e.g. "JS" -> "JavaScript") surfaces its canonical name, not the
-  /// alias itself, since that's what should actually get added.
+  /// Up to 8 catalog skills matching [query]. An alias match surfaces its
+  /// catalog name ("JS" -> "JavaScript"), since that's what gets added.
   List<String> suggestionsFor(String query) {
-    final known = _allKnown;
-    if (query.trim().isEmpty) return known.take(6).toList();
     final lower = query.trim().toLowerCase();
-
-    final aliasMatches = _aliasToCanonical.entries
-        .where((e) => e.key.contains(lower))
-        .map((e) => e.value);
-    final startsWith = known.where((n) => n.toLowerCase().startsWith(lower));
-    final contains = known.where((n) =>
-        !n.toLowerCase().startsWith(lower) && n.toLowerCase().contains(lower));
-
-    final seen = <String>{};
+    if (lower.isEmpty) return _curated.take(8).toList();
     final result = <String>[];
-    for (final name in [...aliasMatches, ...startsWith, ...contains]) {
-      if (seen.add(name.toLowerCase())) result.add(name);
-      if (result.length >= 6) break;
+    void add(String name) {
+      if (!result.contains(name)) result.add(name);
     }
-    return result;
+
+    final exact = _lookup[lower];
+    if (exact != null) add(exact);
+    for (final name in _curated) {
+      if (name.toLowerCase().startsWith(lower)) add(name);
+    }
+    for (final entry in _lookup.entries) {
+      if (entry.key.contains(lower)) add(entry.value);
+    }
+    return result.take(8).toList();
   }
 
-  /// Resolves input to a known skill's canonical name/casing: an exact alias
-  /// match wins first (true synonym mapping, e.g. "JS" -> "JavaScript"), then
-  /// a curated name match case-insensitively, then the most common casing
-  /// already used by real profiles; otherwise returns the trimmed input
-  /// unchanged - the catalog assists, it never blocks a skill that isn't in
-  /// it yet.
-  String canonicalize(String input) {
-    final trimmed = input.trim();
-    if (trimmed.isEmpty) return trimmed;
-    final lower = trimmed.toLowerCase();
-    final aliasHit = _aliasToCanonical[lower];
-    if (aliasHit != null) return aliasHit;
-    for (final name in _curated) {
-      if (name.toLowerCase() == lower) return name;
+  /// Asks admins to add a skill that isn't in the catalog. Once approved it
+  /// is added to the requester's profile automatically. If it turns out to
+  /// be in the catalog after all, its catalog name is returned instead.
+  Future<({String? canonical, bool requested, String? error})> requestSkill(
+    String name, {
+    required bool offered,
+  }) async {
+    try {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('requestSkill')
+          .call({'name': name.trim(), 'side': offered ? 'offered' : 'wanted'});
+      final data = Map<String, dynamic>.from(result.data as Map);
+      return (
+        canonical: data['canonical'] as String?,
+        requested: data['requested'] == true,
+        error: null,
+      );
+    } on FirebaseFunctionsException catch (e) {
+      return (canonical: null, requested: false, error: e.message);
+    } catch (e) {
+      return (
+        canonical: null,
+        requested: false,
+        error: 'Could not send the request. Try again.',
+      );
     }
-    return _mostCommonCasing(lower) ?? trimmed;
   }
 }
