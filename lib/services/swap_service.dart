@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import '../features/analytics/analytics_provider.dart';
@@ -6,6 +7,10 @@ import '../features/analytics/analytics_provider.dart';
 /// Swap sessions turn a chat into a real skill exchange:
 ///
 ///   pending -> accepted -> completed        (or: declined / cancelled / no_show)
+///
+/// Proposing, answering, cancelling and rescheduling run on the server
+/// (functions/schedule.js) so both people's calendars are checked; only a
+/// no-show report is still a direct write.
 ///
 /// Data model (collection `swaps`)
 ///   participants:   [uidA, uidB]
@@ -87,70 +92,138 @@ class SwapSessionService {
         .snapshots();
   }
 
-  Future<bool> proposeSession({
-    required String otherUserId,
-    required String otherUserName,
-    required String myName,
-    required String skillOffered,
-    required String skillWanted,
-    required DateTime scheduledFor,
-    String meetingLink = '',
-    String agenda = '',
-  }) async {
-    final uid = _uid;
-    if (uid == null) return false;
+  static const String statusCancelled = 'cancelled';
+
+  /// Planned session lengths, in minutes (server-enforced).
+  static const List<int> plannedLengths = [30, 45, 60, 90];
+
+  /// Accepted sessions can't be cancelled without a reason this close to
+  /// the start; a running one can be cancelled only in its first 30 minutes.
+  static const int lateCancelHours = 2;
+  static const int runningCancelMinutes = 30;
+
+  final FirebaseFunctions _functions = FirebaseFunctions.instance;
+
+  int get _tz => DateTime.now().timeZoneOffset.inMinutes * -1;
+
+  Future<SessionResult> _call(String name, Map<String, dynamic> data) async {
     try {
-      await _firestore.collection('swaps').add({
-        'participants': [uid, otherUserId],
-        'participantNames': {uid: myName, otherUserId: otherUserName},
-        'skillOffered': skillOffered,
-        'skillWanted': skillWanted,
-        'scheduledFor': Timestamp.fromDate(scheduledFor),
-        'meetingLink': meetingLink,
-        'agenda': agenda,
-        'status': statusPending,
-        'createdBy': uid,
-        'createdAt': FieldValue.serverTimestamp(),
+      final r = await _functions.httpsCallable(name).call({
+        ...data,
+        'tzOffset': _tz,
       });
-
-      await _firestore.collection('notifications').add({
-        'userId': otherUserId,
-        'type': 'session_proposed',
-        'message': '$myName proposed a swap session with you',
-        'timestamp': FieldValue.serverTimestamp(),
-        'read': false,
-        'senderId': uid,
-        'senderName': myName,
-        'senderPhoto': '',
-      });
-
-      AnalyticsProvider.log('session_proposed', uid, {
-        'otherUserId': otherUserId,
-        'skillOffered': skillOffered,
-        'skillWanted': skillWanted,
-      });
-      return true;
+      final map = Map<String, dynamic>.from((r.data as Map?) ?? const {});
+      if (map['needsConfirm'] == true) {
+        return SessionResult.warn(
+          List<String>.from(map['warnings'] ?? const []),
+        );
+      }
+      return SessionResult.ok(map);
+    } on FirebaseFunctionsException catch (e) {
+      final msg = e.message ?? 'Something went wrong. Please try again.';
+      final m = RegExp(r'^([A-Z_]+): (.*)$', dotAll: true).firstMatch(msg);
+      return m == null
+          ? SessionResult.error(msg)
+          : SessionResult.error(m.group(2)!, code: m.group(1));
     } catch (e) {
-      debugPrint('SwapSessionService.proposeSession failed: $e');
-      return false;
+      debugPrint('SwapSessionService.$name failed: $e');
+      return SessionResult.error(
+        'Could not reach Swapnio. Check your connection.',
+      );
     }
   }
 
-  Future<bool> updateStatus(String swapId, String status) async {
-    try {
-      final data = <String, dynamic>{
-        'status': status,
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
-      if (status == statusCompleted) {
-        data['completedAt'] = FieldValue.serverTimestamp();
-      }
-      await _firestore.collection('swaps').doc(swapId).update(data);
-      return true;
-    } catch (e) {
-      debugPrint('SwapSessionService.updateStatus failed: $e');
-      return false;
+  /// Proposes a session. [type] is 'swap' (both teach), 'teach' (only you
+  /// teach) or 'learn' (only you learn). A clash with a pending session
+  /// comes back as warnings - call again with [force] to go ahead; a clash
+  /// with an accepted session is an error.
+  Future<SessionResult> proposeSession({
+    required String otherUserId,
+    required String type,
+    required String skillOffered,
+    required String skillWanted,
+    required DateTime scheduledFor,
+    required int plannedMinutes,
+    String agenda = '',
+    bool force = false,
+  }) async {
+    final r = await _call('proposeSession', {
+      'otherUserId': otherUserId,
+      'sessionType': type,
+      'skillOffered': skillOffered,
+      'skillWanted': skillWanted,
+      'scheduledFor': scheduledFor.millisecondsSinceEpoch,
+      'plannedMinutes': plannedMinutes,
+      'agenda': agenda,
+      'force': force,
+    });
+    if (r.isOk) {
+      AnalyticsProvider.log('session_proposed', _uid ?? '', {
+        'otherUserId': otherUserId,
+        'sessionType': type,
+      });
     }
+    return r;
+  }
+
+  /// Accepts or declines a proposal (only the invited person can).
+  Future<SessionResult> respond(String swapId, {required bool accept}) =>
+      _call('respondSession', {'swapId': swapId, 'accept': accept});
+
+  /// Cancels a session. A reason is optional, except within
+  /// [lateCancelHours] of the start.
+  Future<SessionResult> cancel(String swapId, {String reason = ''}) =>
+      _call('cancelSession', {'swapId': swapId, 'reason': reason});
+
+  /// Asks to move a session (moves it straight away if it's still your own
+  /// unanswered proposal). The current time stays booked until the other
+  /// person accepts.
+  Future<SessionResult> requestReschedule(
+    String swapId, {
+    required DateTime newTime,
+    int? plannedMinutes,
+    bool force = false,
+  }) => _call('requestReschedule', {
+    'swapId': swapId,
+    'scheduledFor': newTime.millisecondsSinceEpoch,
+    if (plannedMinutes != null) 'plannedMinutes': plannedMinutes,
+    'force': force,
+  });
+
+  Future<SessionResult> respondReschedule(
+    String swapId, {
+    required bool accept,
+  }) => _call('respondReschedule', {'swapId': swapId, 'accept': accept});
+
+  /// Busy blocks between [from] and [to]: mine (labelled) and, with
+  /// [otherUserId], theirs (unlabelled).
+  Future<BusyTimes> busyTimes({
+    required DateTime from,
+    required DateTime to,
+    String? otherUserId,
+    String? excludeSwapId,
+  }) async {
+    final r = await _call('busyTimes', {
+      'from': from.millisecondsSinceEpoch,
+      'to': to.millisecondsSinceEpoch,
+      if (otherUserId != null) 'otherUserId': otherUserId,
+      if (excludeSwapId != null) 'excludeSwapId': excludeSwapId,
+    });
+    if (!r.isOk) return const BusyTimes([], []);
+    List<BusyBlock> parse(Object? v) => [
+      for (final b in (v as List? ?? const []))
+        BusyBlock.fromMap(Map<String, dynamic>.from(b as Map)),
+    ];
+    return BusyTimes(parse(r.data['mine']), parse(r.data['theirs']));
+  }
+
+  /// My own cancellations in the last 30 days (never shown to others).
+  Future<({int total, int late})> myCancellationStats() async {
+    final r = await _call('myCancellationStats', {});
+    return (
+      total: (r.data['total'] as num?)?.toInt() ?? 0,
+      late: (r.data['late'] as num?)?.toInt() ?? 0,
+    );
   }
 
   /// Flags a scheduled session as a no-show instead of completing it - the
@@ -171,77 +244,76 @@ class SwapSessionService {
     }
   }
 
-  /// Marks a session complete and awards gamification points to both users.
-  ///
-  /// Uses a transaction on the swap doc so double-tapping "Mark as completed"
-  /// cannot award points twice: points are only given when the status actually
-  /// transitions accepted -> completed.
-  Future<bool> completeSession(
-    String swapId,
-    List<dynamic> participants, {
-    int points = 25,
+  /// Minimum length before a session can be completed. The
+  /// completeSwapSession Cloud Function is the real gate; this is for the UI.
+  static const int minSessionMinutes = 30;
+
+  /// Check-in opens this long before the scheduled start (server-enforced).
+  static const int checkInEarlyMinutes = 15;
+
+  /// Checks the current user in. The session's clock starts on the server
+  /// once both participants have checked in. Returns an error message, or
+  /// null on success.
+  Future<String?> checkIn(String swapId) async {
+    try {
+      await FirebaseFunctions.instance.httpsCallable('checkInSession').call({
+        'swapId': swapId,
+      });
+      AnalyticsProvider.log('session_checkin', _uid ?? '', {'swapId': swapId});
+      return null;
+    } on FirebaseFunctionsException catch (e) {
+      return e.message ?? 'Could not check in. Please try again.';
+    } catch (e) {
+      debugPrint('SwapSessionService.checkIn failed: $e');
+      return 'Could not check in. Please try again.';
+    }
+  }
+
+  /// Confirms the session happened. Both participants must confirm before it
+  /// counts - there is no automatic confirmation - the server enforces
+  /// the check-ins and the minimum length and awards points and badges.
+  Future<({bool ok, bool completed, String? error})> confirmCompletion(
+    String swapId, {
     String sessionNotes = '',
     bool goalAchieved = true,
+    Map<String, dynamic>? swapData,
   }) async {
-    bool transitioned = false;
-    String? skillOffered;
-    String? skillWanted;
-    String? createdBy;
     try {
-      await _firestore.runTransaction((tx) async {
-        final ref = _firestore.collection('swaps').doc(swapId);
-        final snap = await tx.get(ref);
-        if (!snap.exists) return;
-        final data = snap.data()!;
-        final currentStatus = data['status'] as String? ?? '';
-        if (currentStatus == statusCompleted) return;
-        tx.update(ref, {
-          'status': statusCompleted,
-          'completedAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-          if (sessionNotes.isNotEmpty) 'sessionNotes': sessionNotes,
-          'goalAchieved': goalAchieved,
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('completeSwapSession')
+          .call({
+            'swapId': swapId,
+            'notes': sessionNotes,
+            'goalAchieved': goalAchieved,
+          });
+      final completed = (result.data as Map?)?['completed'] == true;
+      final uid = _uid;
+      if (uid != null) {
+        AnalyticsProvider.log('session_completed', uid, {
+          'swapId': swapId,
+          'confirmedByBoth': completed,
         });
-        skillOffered = data['skillOffered'] as String?;
-        skillWanted = data['skillWanted'] as String?;
-        createdBy = data['createdBy'] as String?;
-        transitioned = true;
-      });
+        // Progress Dashboard bookkeeping (self-written, not trusted by the
+        // passport): record this user's side of the swap.
+        if (swapData != null) {
+          final offered = swapData['skillOffered'] as String?;
+          final wanted = swapData['skillWanted'] as String?;
+          if (offered != null && wanted != null) {
+            final iAmOrganiser = uid == swapData['createdBy'];
+            final taught = iAmOrganiser ? offered : wanted;
+            final learned = iAmOrganiser ? wanted : offered;
+            await _recordSessionProgress(uid, taught);
+            if (learned != taught) await _recordSessionProgress(uid, learned);
+          }
+        }
+      }
+      return (ok: true, completed: completed, error: null);
+    } on FirebaseFunctionsException catch (e) {
+      return (ok: false, completed: false, error: e.message);
     } catch (e) {
-      debugPrint('SwapSessionService.completeSession failed: $e');
-      return false;
+      debugPrint('SwapSessionService.confirmCompletion failed: $e');
+      return (ok: false, completed: false, error: null);
     }
-    if (!transitioned) return true; // already completed before - no re-award
-
-    // Log the completion event for the analytics dashboard.
-    final completerUid = _uid;
-    if (completerUid != null) {
-      AnalyticsProvider.log('session_completed', completerUid, {
-        'swapId': swapId,
-        'skillOffered': skillOffered ?? '',
-        'skillWanted': skillWanted ?? '',
-      });
-    }
-
-    // Points/badges are awarded server-side by the `badgeOnCompletedSwap`
-    // Cloud Function on the pending->completed transition. Writing the
-    // partner's gamification doc client-side is rejected by the security
-    // rules (allow write: if isSelf), so it must NOT be done here.
-
-    // Progress tracking: each participant can only write their OWN progress
-    // doc (security rules), so this only records the CALLER's side of the
-    // swap - the skill they taught and the skill they learned. `skillOffered`
-    // /`skillWanted` are recorded from the swap organiser's (`createdBy`)
-    // perspective, so they're flipped for the other participant.
-    final myUid = _uid;
-    if (myUid != null && skillOffered != null && skillWanted != null) {
-      final iAmOrganiser = myUid == createdBy;
-      final taught = iAmOrganiser ? skillOffered! : skillWanted!;
-      final learned = iAmOrganiser ? skillWanted! : skillOffered!;
-      await _recordSessionProgress(myUid, taught);
-      if (learned != taught) await _recordSessionProgress(myUid, learned);
-    }
-    return true;
   }
 
   /// Increments the session count for one skill on the current user's own
@@ -270,61 +342,19 @@ class SwapSessionService {
             'peerRatingCount': 0,
           });
         } else {
-          existing['sessionsCompleted'] = (existing['sessionsCompleted'] ?? 0) + 1;
+          existing['sessionsCompleted'] =
+              (existing['sessionsCompleted'] ?? 0) + 1;
           existing['streakDays'] = (existing['streakDays'] ?? 0) + 1;
         }
-        tx.set(
-          ref,
-          {
-            'totalSessions': (data['totalSessions'] ?? 0) + 1,
-            'totalMessages': data['totalMessages'] ?? 0,
-            'totalTasks': data['totalTasks'] ?? 0,
-            'skills': skills,
-          },
-          SetOptions(merge: true),
-        );
+        tx.set(ref, {
+          'totalSessions': (data['totalSessions'] ?? 0) + 1,
+          'totalMessages': data['totalMessages'] ?? 0,
+          'totalTasks': data['totalTasks'] ?? 0,
+          'skills': skills,
+        }, SetOptions(merge: true));
       });
     } catch (e) {
       debugPrint('SwapSessionService._recordSessionProgress failed: $e');
-    }
-  }
-
-  /// Reschedules an accepted (or pending) session and notifies the partner.
-  Future<bool> rescheduleSession({
-    required String swapId,
-    required Map<String, dynamic> swapData,
-    required String myName,
-    required DateTime newTime,
-  }) async {
-    final uid = _uid;
-    if (uid == null) return false;
-    try {
-      await _firestore.collection('swaps').doc(swapId).update({
-        'scheduledFor': Timestamp.fromDate(newTime),
-        'rescheduledBy': uid,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      final participants = List<String>.from(swapData['participants'] ?? []);
-      final otherId = participants.firstWhere((p) => p != uid,
-          orElse: () => '');
-      if (otherId.isEmpty) return true;
-
-      await _firestore.collection('notifications').add({
-        'userId': otherId,
-        'type': 'session_rescheduled',
-        'message':
-            '$myName rescheduled your swap session to ${newTime.toLocal()}',
-        'timestamp': FieldValue.serverTimestamp(),
-        'read': false,
-        'senderId': uid,
-        'senderName': myName,
-        'senderPhoto': '',
-      });
-      return true;
-    } catch (e) {
-      debugPrint('SwapSessionService.rescheduleSession failed: $e');
-      return false;
     }
   }
 
@@ -341,8 +371,9 @@ class SwapSessionService {
           .limit(20)
           .get();
       for (final doc in snapshot.docs) {
-        final participants =
-            List<String>.from(doc.data()['participants'] ?? []);
+        final participants = List<String>.from(
+          doc.data()['participants'] ?? [],
+        );
         if (participants.contains(otherUserId)) return doc.id;
       }
     } catch (e) {
@@ -350,4 +381,53 @@ class SwapSessionService {
     }
     return null;
   }
+}
+
+/// The outcome of a scheduling call: done, needs the caller to confirm
+/// warnings (a pending clash), or failed with a message to show.
+class SessionResult {
+  final Map<String, dynamic> data;
+  final List<String> warnings;
+  final String? error;
+
+  /// Machine-readable reason, e.g. CALENDAR_REQUIRED.
+  final String? code;
+
+  const SessionResult._(this.data, this.warnings, this.error, [this.code]);
+
+  factory SessionResult.ok(Map<String, dynamic> data) =>
+      SessionResult._(data, const [], null);
+  factory SessionResult.warn(List<String> warnings) =>
+      SessionResult._(const {}, warnings, null);
+  factory SessionResult.error(String message, {String? code}) =>
+      SessionResult._(const {}, const [], message, code);
+
+  bool get isOk => error == null && warnings.isEmpty;
+  bool get needsConfirm => warnings.isNotEmpty;
+}
+
+/// A block of time that's taken. [label] is set only for my own sessions.
+class BusyBlock {
+  final DateTime start;
+  final DateTime end;
+  final String kind;
+  final String? label;
+
+  const BusyBlock(this.start, this.end, this.kind, this.label);
+
+  bool get isFirm => kind == 'accepted' || kind == 'external';
+
+  factory BusyBlock.fromMap(Map<String, dynamic> m) => BusyBlock(
+    DateTime.fromMillisecondsSinceEpoch((m['start'] as num).toInt()),
+    DateTime.fromMillisecondsSinceEpoch((m['end'] as num).toInt()),
+    (m['kind'] as String?) ?? 'accepted',
+    m['label'] as String?,
+  );
+}
+
+class BusyTimes {
+  final List<BusyBlock> mine;
+  final List<BusyBlock> theirs;
+
+  const BusyTimes(this.mine, this.theirs);
 }

@@ -31,8 +31,10 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
   @override
   void initState() {
     super.initState();
-    _swapStream =
-        FirebaseFirestore.instance.collection('swaps').doc(widget.swapId).snapshots();
+    _swapStream = FirebaseFirestore.instance
+        .collection('swaps')
+        .doc(widget.swapId)
+        .snapshots();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -62,7 +64,9 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                 children: [
                   _topBar(null),
                   const Expanded(
-                    child: Center(child: Text('This session no longer exists.')),
+                    child: Center(
+                      child: Text('This session no longer exists.'),
+                    ),
                   ),
                 ],
               ),
@@ -97,16 +101,36 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
               ),
             ),
           ),
-          if (data != null && status == SwapSessionService.statusAccepted)
+          // Hidden once the session has started (both checked in): it can
+          // no longer be rescheduled or reported as a no-show.
+          if (data != null &&
+              status == SwapSessionService.statusAccepted &&
+              data['startedAt'] == null)
             PopupMenuButton<String>(
               icon: Icon(Icons.more_horiz_rounded, color: c.text),
               onSelected: (v) {
-                if (v == 'reschedule') rescheduleSessionFlow(context, widget.swapId, data);
+                if (v == 'reschedule') {
+                  rescheduleSessionFlow(context, widget.swapId, data);
+                }
+                if (v == 'cancel') {
+                  cancelSessionFlow(context, widget.swapId, data);
+                }
                 if (v == 'noshow') confirmNoShowFlow(context, widget.swapId);
               },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'reschedule', child: Text('Reschedule')),
-                PopupMenuItem(value: 'noshow', child: Text("Didn't happen")),
+              itemBuilder: (_) => [
+                if (data['pendingReschedule'] == null)
+                  const PopupMenuItem(
+                    value: 'reschedule',
+                    child: Text('Reschedule'),
+                  ),
+                const PopupMenuItem(
+                  value: 'cancel',
+                  child: Text('Cancel session'),
+                ),
+                const PopupMenuItem(
+                  value: 'noshow',
+                  child: Text("Didn't happen"),
+                ),
               ],
             )
           else
@@ -124,7 +148,8 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
     final otherName = (names[otherId] as String?) ?? 'your partner';
     final firstName = otherName.split(' ').first;
     final sides = swapSidesFor(data, _uid);
-    final status = (data['status'] as String?) ?? SwapSessionService.statusPending;
+    final status =
+        (data['status'] as String?) ?? SwapSessionService.statusPending;
     final link = (data['meetingLink'] as String?)?.trim() ?? '';
     final agenda = _agendaItems((data['agenda'] as String?) ?? '');
     final notes = (data['sessionNotes'] as String?)?.trim() ?? '';
@@ -140,6 +165,12 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
               children: [
                 _hero(status, when, sides, firstName),
                 const SizedBox(height: 16),
+                if (status == SwapSessionService.statusAccepted) ...[
+                  if (data['startedAt'] == null)
+                    RescheduleRequestBanner(swapId: widget.swapId, data: data),
+                  SessionTimerPanel(swapId: widget.swapId, data: data),
+                  const SizedBox(height: 16),
+                ],
                 if (link.isNotEmpty) ...[
                   _linkCard(link),
                   const SizedBox(height: 16),
@@ -153,11 +184,18 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Notes', style: AppTheme.display(fontSize: 20, color: c.text)),
+                        Text(
+                          'Notes',
+                          style: AppTheme.display(fontSize: 20, color: c.text),
+                        ),
                         const SizedBox(height: 8),
                         Text(
                           notes,
-                          style: GoogleFonts.manrope(fontSize: 13.5, color: c.textMuted, height: 1.45),
+                          style: GoogleFonts.manrope(
+                            fontSize: 13.5,
+                            color: c.textMuted,
+                            height: 1.45,
+                          ),
                         ),
                       ],
                     ),
@@ -195,11 +233,15 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
       color: Colors.white.withValues(alpha: 0.5),
     );
     Widget unitPair(String v, String u) => Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [Text(v, style: num), const SizedBox(width: 2), Text(u, style: unit)],
-        );
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text(v, style: num),
+        const SizedBox(width: 2),
+        Text(u, style: unit),
+      ],
+    );
 
     if (status == SwapSessionService.statusCompleted) {
       eyebrow = 'COMPLETED';
@@ -209,9 +251,14 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
       big = Text('No-show', style: num.copyWith(color: Colors.white70));
     } else if (status == SwapSessionService.statusDeclined) {
       eyebrow = 'DECLINED';
+      big = Text('Declined', style: num.copyWith(color: Colors.white70));
+    } else if (status == SwapSessionService.statusCancelled) {
+      eyebrow = 'CANCELLED';
       big = Text('Cancelled', style: num.copyWith(color: Colors.white70));
     } else if (when == null) {
-      eyebrow = status == SwapSessionService.statusPending ? 'PROPOSED' : 'SCHEDULED';
+      eyebrow = status == SwapSessionService.statusPending
+          ? 'PROPOSED'
+          : 'SCHEDULED';
       big = Text('Time TBD', style: num);
     } else {
       final diff = when.difference(now);
@@ -220,36 +267,51 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
         big = Text(diff.inMinutes > -90 ? 'Live' : 'Overdue', style: num);
       } else if (diff.inDays >= 1) {
         eyebrow = 'STARTS IN';
-        big = Wrap(spacing: 10, children: [
-          unitPair('${diff.inDays}', 'd'),
-          unitPair('${diff.inHours % 24}', 'h'),
-          unitPair((diff.inMinutes % 60).toString().padLeft(2, '0'), 'm'),
-        ]);
+        big = Wrap(
+          spacing: 10,
+          children: [
+            unitPair('${diff.inDays}', 'd'),
+            unitPair('${diff.inHours % 24}', 'h'),
+            unitPair((diff.inMinutes % 60).toString().padLeft(2, '0'), 'm'),
+          ],
+        );
       } else {
         eyebrow = 'STARTS IN';
         String two(int v) => v.toString().padLeft(2, '0');
-        big = Wrap(spacing: 10, children: [
-          unitPair(two(diff.inHours), 'h'),
-          unitPair(two(diff.inMinutes % 60), 'm'),
-          unitPair(two(diff.inSeconds % 60), 's'),
-        ]);
+        big = Wrap(
+          spacing: 10,
+          children: [
+            unitPair(two(diff.inHours), 'h'),
+            unitPair(two(diff.inMinutes % 60), 'm'),
+            unitPair(two(diff.inSeconds % 60), 's'),
+          ],
+        );
       }
     }
 
     return Container(
       padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(color: c.ink, borderRadius: BorderRadius.circular(28)),
+      decoration: BoxDecoration(
+        color: c.ink,
+        borderRadius: BorderRadius.circular(28),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(eyebrow, style: AppTheme.label(color: Colors.white.withValues(alpha: 0.7))),
+          Text(
+            eyebrow,
+            style: AppTheme.label(color: Colors.white.withValues(alpha: 0.7)),
+          ),
           const SizedBox(height: 10),
           big,
           const SizedBox(height: 12),
           if (when != null)
             Text(
               '${_dayLabel(when)} · ${DateFormat.jm().format(when)}',
-              style: GoogleFonts.manrope(fontSize: 13, color: Colors.white.withValues(alpha: 0.8)),
+              style: GoogleFonts.manrope(
+                fontSize: 13,
+                color: Colors.white.withValues(alpha: 0.8),
+              ),
             ),
           const SizedBox(height: 16),
           SwapSplit(
@@ -275,13 +337,13 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
   }
 
   Widget _surfaceCard({required Widget child}) => Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: context.sw.surface,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: child,
-      );
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      color: context.sw.surface,
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: child,
+  );
 
   Widget _linkCard(String link) {
     final c = context.sw;
@@ -289,15 +351,18 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
     final label = host.contains('meet.google')
         ? 'Google Meet'
         : host.contains('zoom')
-            ? 'Zoom'
-            : host.contains('jit.si')
-                ? 'Jitsi'
-                : 'Meeting link';
+        ? 'Zoom'
+        : host.contains('jit.si')
+        ? 'Jitsi'
+        : 'Meeting link';
     return Pressable(
-      onTap: () => copyMeetingLink(context, link),
+      onTap: () => openMeetLink(context, link),
       child: Container(
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(20)),
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(20),
+        ),
         child: Row(
           children: [
             Container(
@@ -314,15 +379,23 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label,
-                      style: GoogleFonts.manrope(
-                          fontSize: 13.5, fontWeight: FontWeight.w800, color: c.text)),
+                  Text(
+                    label,
+                    style: GoogleFonts.manrope(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: c.text,
+                    ),
+                  ),
                   const SizedBox(height: 2),
                   Text(
                     link.replaceFirst(RegExp(r'^https?://'), ''),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.manrope(fontSize: 12, color: c.textMuted),
+                    style: GoogleFonts.manrope(
+                      fontSize: 12,
+                      color: c.textMuted,
+                    ),
                   ),
                 ],
               ),
@@ -342,10 +415,19 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
         children: [
           Row(
             children: [
-              Expanded(child: Text('Agenda', style: AppTheme.display(fontSize: 20, color: c.text))),
+              Expanded(
+                child: Text(
+                  'Agenda',
+                  style: AppTheme.display(fontSize: 20, color: c.text),
+                ),
+              ),
               Text(
                 '${items.length} ${items.length == 1 ? 'item' : 'items'}',
-                style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w800, color: c.get),
+                style: GoogleFonts.manrope(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: c.get,
+                ),
               ),
             ],
           ),
@@ -364,16 +446,27 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                       color: c.surfaceLow,
                       borderRadius: BorderRadius.circular(7),
                     ),
-                    child: Text('${i + 1}',
-                        style: GoogleFonts.manrope(
-                            fontSize: 11, fontWeight: FontWeight.w800, color: c.textMuted)),
+                    child: Text(
+                      '${i + 1}',
+                      style: GoogleFonts.manrope(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: c.textMuted,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.only(top: 2),
-                      child: Text(items[i],
-                          style: GoogleFonts.manrope(fontSize: 13.5, color: c.text, height: 1.35)),
+                      child: Text(
+                        items[i],
+                        style: GoogleFonts.manrope(
+                          fontSize: 13.5,
+                          color: c.text,
+                          height: 1.35,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -394,85 +487,138 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
     final c = context.sw;
     final isMine = data['createdBy'] == _uid;
     Widget bar(List<Widget> children) => Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-          child: Row(children: children),
-        );
-    Widget big(String label, IconData icon, Color bg, Color fg, VoidCallback onTap) => Expanded(
-          child: Pressable(
-            onTap: onTap,
-            child: Container(
-              height: 56,
-              decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(18)),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(icon, size: 19, color: fg),
-                  const SizedBox(width: 8),
-                  Text(label,
-                      style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w800, color: fg)),
-                ],
-              ),
-            ),
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+      child: Row(children: children),
+    );
+    Widget big(
+      String label,
+      IconData icon,
+      Color bg,
+      Color fg,
+      VoidCallback onTap,
+    ) => Expanded(
+      child: Pressable(
+        onTap: onTap,
+        child: Container(
+          height: 56,
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(18),
           ),
-        );
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 19, color: fg),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: GoogleFonts.manrope(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: fg,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
     Widget square(IconData icon, String tip, VoidCallback onTap) => Padding(
-          padding: const EdgeInsets.only(right: 10),
-          child: Tooltip(
-            message: tip,
-            child: Pressable(
-              onTap: onTap,
-              child: Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(18)),
-                child: Icon(icon, color: c.text),
-              ),
+      padding: const EdgeInsets.only(right: 10),
+      child: Tooltip(
+        message: tip,
+        child: Pressable(
+          onTap: onTap,
+          child: Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: c.surface,
+              borderRadius: BorderRadius.circular(18),
             ),
+            child: Icon(icon, color: c.text),
           ),
-        );
+        ),
+      ),
+    );
 
     if (status == SwapSessionService.statusPending) {
       if (isMine) {
         return bar([
           Expanded(
-            child: Text('Waiting for them to accept',
-                style: GoogleFonts.manrope(fontSize: 13.5, color: c.textMuted)),
+            child: Text(
+              'Waiting for them to accept',
+              style: GoogleFonts.manrope(fontSize: 13.5, color: c.textMuted),
+            ),
           ),
           TextButton(
-            onPressed: () => SwapSessionService.instance
-                .updateStatus(widget.swapId, SwapSessionService.statusDeclined),
-            child: const Text('Cancel'),
+            onPressed: () =>
+                rescheduleSessionFlow(context, widget.swapId, data),
+            child: const Text('Change time'),
+          ),
+          TextButton(
+            onPressed: () => cancelSessionFlow(context, widget.swapId, data),
+            child: const Text('Withdraw'),
           ),
         ]);
       }
       return bar([
-        square(Icons.close_rounded, 'Decline', () {
-          SwapSessionService.instance.updateStatus(widget.swapId, SwapSessionService.statusDeclined);
-        }),
-        big('Accept session', Icons.check_rounded, c.cta, c.onCta, () {
-          SwapSessionService.instance.updateStatus(widget.swapId, SwapSessionService.statusAccepted);
-        }),
+        square(
+          Icons.close_rounded,
+          'Decline',
+          () => answerProposalFlow(
+            context,
+            widget.swapId,
+            accept: false,
+            otherUserId: sessionOtherId(data),
+            otherName: sessionOtherFirstName(data),
+          ),
+        ),
+        big(
+          'Accept session',
+          Icons.check_rounded,
+          c.cta,
+          c.onCta,
+          () => answerProposalFlow(
+            context,
+            widget.swapId,
+            accept: true,
+            otherUserId: sessionOtherId(data),
+            otherName: sessionOtherFirstName(data),
+          ),
+        ),
       ]);
     }
 
-    if (status != SwapSessionService.statusAccepted) return const SizedBox(height: 8);
+    if (status != SwapSessionService.statusAccepted)
+      return const SizedBox(height: 8);
 
-    final started = when != null && DateTime.now().isAfter(when);
-    void complete() => completeSessionFlow(context, widget.swapId, participants);
-    if (started || link.isEmpty) {
+    // Check-in and completion live in the SessionTimerPanel above; the bar
+    // keeps the call and scheduling actions.
+    if (link.isNotEmpty) {
       return bar([
-        if (link.isNotEmpty)
-          square(Icons.videocam_rounded, 'Copy meeting link', () => copyMeetingLink(context, link))
-        else
-          square(Icons.event_repeat_rounded, 'Reschedule',
-              () => rescheduleSessionFlow(context, widget.swapId, data)),
-        big('Mark as completed', Icons.check_circle_rounded, c.win, c.onWin, complete),
+        square(
+          Icons.event_repeat_rounded,
+          'Reschedule',
+          () => rescheduleSessionFlow(context, widget.swapId, data),
+        ),
+        big(
+          'Join call',
+          Icons.call_rounded,
+          c.win,
+          c.onWin,
+          () => openMeetLink(context, link),
+        ),
       ]);
     }
     return bar([
-      square(Icons.event_repeat_rounded, 'Reschedule',
-          () => rescheduleSessionFlow(context, widget.swapId, data)),
-      big('Join call', Icons.call_rounded, c.win, c.onWin, () => copyMeetingLink(context, link)),
+      big(
+        'Reschedule',
+        Icons.event_repeat_rounded,
+        c.surface,
+        c.text,
+        () => rescheduleSessionFlow(context, widget.swapId, data),
+      ),
     ]);
   }
 }

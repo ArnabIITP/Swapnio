@@ -1,141 +1,108 @@
-import 'dart:convert';
-
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:http/http.dart' as http;
 
-/// Real Google Calendar + Google Meet integration for swap sessions.
+/// Connects the member's Google Calendar to Swapnio's server (see
+/// functions/calendar.js).
 ///
-/// Accounts created with "Sign in with Google" already have a cached Google
-/// session on-device, so calendar access can usually be granted silently -
-/// no separate "connect" step. Accounts created with email/password have no
-/// such session, so they go through an explicit one-time consent
-/// ([connect]) the first time they try to schedule a session with a Meet
-/// link.
-///
-/// Creating the event with `conferenceData` set is what makes Google
-/// generate a real, unique Meet link for that event - the same thing the
-/// Calendar UI does when you tick "Add Google Meet video conferencing".
+/// Google sign-in here asks for the calendar scopes and returns a one-time
+/// server auth code; the server swaps it for lasting access, stored
+/// encrypted, so it can create each accepted session's event (with a Meet
+/// link and both people as guests), move it on reschedule and delete it on
+/// cancel - even while this phone is off. Nothing calendar-related runs on
+/// the device any more.
 class GoogleCalendarService {
   GoogleCalendarService._();
 
   static final GoogleCalendarService instance = GoogleCalendarService._();
 
-  static const String _calendarScope =
+  /// The Firebase project's web OAuth client - the server exchanges the
+  /// auth code against it.
+  static const String _serverClientId =
+      '924792323555-ludfh213atbvrhtclsmj6of0c8s5o3rl.apps.googleusercontent.com';
+  static const String eventsScope =
       'https://www.googleapis.com/auth/calendar.events';
+  static const String freeBusyScope =
+      'https://www.googleapis.com/auth/calendar.freebusy';
 
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    scopes: ['email', _calendarScope],
+  /// Codes the server puts at the start of a scheduling error when a
+  /// connection is missing: yours, or the other person's.
+  static const String requiredMarker = 'CALENDAR_REQUIRED';
+  static const String partnerMarker = 'PARTNER_CALENDAR_REQUIRED';
+
+  final _functions = FirebaseFunctions.instance;
+
+  /// Everything Swapnio needs from Google, asked for in ONE consent screen:
+  /// calendar events (with Meet links) and free/busy.
+  GoogleSignIn _signIn() => GoogleSignIn(
+    scopes: ['email', eventsScope, freeBusyScope],
+    serverClientId: _serverClientId,
+    // Android: always return a code the server can trade for a refresh
+    // token, even if this account granted access before.
+    forceCodeForRefreshToken: true,
   );
 
-  bool _connected = false;
-  bool get isConnected => _connected;
-
-  /// True if this account authenticated with Google in the first place -
-  /// for these users, calendar access can be granted without a separate
-  /// "connect your calendar" prompt.
-  bool get signedInWithGoogle {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return false;
-    return user.providerData.any((p) => p.providerId == 'google.com');
-  }
-
-  /// Tries to silently pick up calendar access - works for Google-auth users
-  /// whose device already has a cached Google session, and for anyone who
-  /// has connected before this app launch. Never prompts the user.
-  Future<bool> ensureConnected() async {
-    if (_connected) return true;
+  /// The single Connect button. Returns null on success, or a message.
+  Future<String?> connect() async {
+    final google = _signIn();
     try {
-      final account = await _googleSignIn.signInSilently();
-      if (account == null) return false;
-      final granted = await _googleSignIn.requestScopes([_calendarScope]);
-      _connected = granted;
-      return granted;
-    } catch (e) {
-      debugPrint('GoogleCalendarService.ensureConnected failed: $e');
-      return false;
-    }
-  }
-
-  /// Explicit, user-initiated connect flow (the "Connect Google Calendar"
-  /// button) - for accounts that signed up with email/password and have no
-  /// cached Google session to pick up silently.
-  Future<bool> connect() async {
-    try {
-      final account = await _googleSignIn.signIn();
-      if (account == null) return false;
-      final granted = await _googleSignIn.requestScopes([_calendarScope]);
-      _connected = granted;
-      return granted;
+      final account = await google.signIn();
+      if (account == null) return 'Connection cancelled.';
+      final code = account.serverAuthCode;
+      if (code == null || code.isEmpty) {
+        return "Google didn't return a sign-in code. Please try again.";
+      }
+      await _functions.httpsCallable('connectGoogleCalendar').call({
+        'code': code,
+      });
+      return null;
+    } on FirebaseFunctionsException catch (e) {
+      return e.message ?? 'Could not connect Google Calendar.';
     } catch (e) {
       debugPrint('GoogleCalendarService.connect failed: $e');
-      return false;
+      return 'Could not connect Google Calendar. Please try again.';
+    } finally {
+      // The server holds the access now; no need to keep a device session.
+      await google.signOut().catchError((_) => null);
     }
   }
 
-  Future<void> disconnect() async {
+  Future<String?> disconnect() async {
     try {
-      await _googleSignIn.signOut();
+      await _functions.httpsCallable('disconnectGoogleCalendar').call();
+      return null;
+    } on FirebaseFunctionsException catch (e) {
+      return e.message ?? 'Could not disconnect.';
     } catch (_) {
-      // Best effort - the in-memory flag below is what the UI relies on.
+      return 'Could not disconnect. Check your connection.';
     }
-    _connected = false;
   }
 
-  /// Creates a calendar event for the swap session with a real, auto-
-  /// generated Google Meet link attached, and returns that link - or null
-  /// if calendar access isn't connected or the request fails, in which case
-  /// the session is still proposed, just without a meeting link.
-  Future<String?> createSwapEvent({
-    required String title,
-    required DateTime start,
-    required String description,
-  }) async {
-    if (!_connected) return null;
+  Future<({bool connected, String email, bool freeBusy, bool shareBusy})>
+  status() async {
     try {
-      final account = _googleSignIn.currentUser;
-      if (account == null) return null;
-      final auth = await account.authentication;
-      final token = auth.accessToken;
-      if (token == null) return null;
-
-      final end = start.add(const Duration(hours: 1));
-      final uri = Uri.parse(
-        'https://www.googleapis.com/calendar/v3/calendars/primary/events'
-        '?conferenceDataVersion=1',
+      final r = await _functions.httpsCallable('calendarStatus').call();
+      final m = Map<String, dynamic>.from(r.data as Map);
+      return (
+        connected: m['connected'] == true,
+        email: (m['email'] as String?) ?? '',
+        freeBusy: m['freeBusy'] == true,
+        shareBusy: m['shareBusy'] == true,
       );
-      final response = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'summary': title,
-          'description': description,
-          'start': {'dateTime': start.toUtc().toIso8601String()},
-          'end': {'dateTime': end.toUtc().toIso8601String()},
-          'conferenceData': {
-            'createRequest': {
-              'requestId': 'swapnio-${DateTime.now().millisecondsSinceEpoch}',
-              'conferenceSolutionKey': {'type': 'hangoutsMeet'},
-            },
-          },
-        }),
-      );
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        return data['hangoutLink'] as String?;
-      }
-      debugPrint(
-        'GoogleCalendarService.createSwapEvent: ${response.statusCode} ${response.body}',
-      );
-      return null;
     } catch (e) {
-      debugPrint('GoogleCalendarService.createSwapEvent failed: $e');
+      debugPrint('GoogleCalendarService.status failed: $e');
+      return (connected: false, email: '', freeBusy: false, shareBusy: false);
+    }
+  }
+
+  Future<String?> setBusySharing(bool share) async {
+    try {
+      await _functions.httpsCallable('setBusySharing').call({'share': share});
       return null;
+    } on FirebaseFunctionsException catch (e) {
+      return e.message ?? 'Could not change sharing.';
+    } catch (_) {
+      return 'Could not change sharing. Check your connection.';
     }
   }
 }
